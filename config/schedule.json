@@ -1,5 +1,5 @@
 {
-  "_comment": "Automatic jobs. Edit in the varsha panel (Databases); see varsha/schedule.py for the format.",
+  "_comment": "Automatic jobs. Edit in the varsha panel (Databases, Tasks); see varsha/schedule.py for the format.",
   "backups": {
     "mariadb-11.8": {
       "enabled": false,
@@ -10,5 +10,6 @@
       "databases": [],
       "since": 1793785405.1892385
     }
-  }
+  },
+  "tasks": {}
 }

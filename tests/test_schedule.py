@@ -198,3 +198,116 @@ def test_backup_rejects_bad_database_names(tmp_path: Path) -> None:
 def test_today_helper_sanity() -> None:
     # guard for the date maths above: 2026-11-04 is a Wednesday
     assert datetime(2026, 11, 4).weekday() == 2 and (datetime(2026, 11, 8) - timedelta(days=0)).weekday() == 6
+
+
+# ---------------------------------------------------------------- scheduled tasks (cron)
+
+from varsha.schedule import TaskPlan, parse_task  # noqa: E402
+
+
+def task_scheduler(tmp_path: Path) -> tuple[Scheduler, list[tuple]]:
+    manager = FakeManager(tmp_path)
+    notes: list[tuple] = []
+    work = tmp_path / "work"
+    work.mkdir(exist_ok=True)
+
+    def prepare(plan: TaskPlan) -> tuple[Path, dict[str, str], str]:
+        return (Path(plan.cwd) if plan.cwd else work), dict(os.environ), "PHP 8.3.33"
+
+    sched = Scheduler(manager, FakeTools(manager), tmp_path / "config" / "schedule.json",  # type: ignore[arg-type]
+                      tmp_path / "data" / "schedule-state.json", notify=lambda *a: notes.append(a),
+                      prepare_task=prepare, logs_dir=tmp_path / "logs")
+    return sched, notes
+
+
+def test_task_validation(tmp_path: Path) -> None:
+    ok = parse_task({"name": " Nightly ", "command": "php artisan schedule:run", "site": "admin.test", "every": "1m"}, "t0a1b2c")
+    assert (ok.name, ok.where, ok.every, ok.describe()) == ("Nightly", "project", "1m", "every minute")
+    custom = parse_task({"name": "x", "command": "dir", "cwd": str(tmp_path)}, "t0a1b2c")
+    assert custom.where == "custom"
+    for bad in ({"name": "", "command": "dir", "cwd": str(tmp_path)},
+                {"name": "x", "command": "dir\r\nformat c:", "cwd": str(tmp_path)},
+                {"name": "x", "command": "dir", "cwd": "relative\folder"},
+                {"name": "x", "command": "dir", "where": "site"},             # where=site needs a site
+                {"name": "x", "command": "dir", "site": "Bad Site!"},
+                {"name": "x", "command": "dir", "site": "a.test", "php": "8.x"},
+                {"name": "x", "command": "dir", "site": "a.test", "timeout": 5},
+                {"name": "x", "command": "dir", "site": "a.test", "every": "2m"}):
+        with pytest.raises(ConfigError):
+            parse_task(bad, "t0a1b2c")
+    with pytest.raises(ConfigError):
+        parse_task({"name": "x", "command": "dir", "site": "a.test"}, "../evil")
+    with pytest.raises(ConfigError):  # backups don't do minute intervals
+        parse_backup_plan({"every": "1m"})
+
+
+def test_task_runs_with_output_log_and_state(tmp_path: Path) -> None:
+    sched, notes = task_scheduler(tmp_path)
+    plan = sched.save_task({"name": "Hello", "command": "echo hello from cron && echo second line", "cwd": str(tmp_path), "every": "5m"})
+    assert sched.run_due() == [plan.id]  # interval tasks run right after they're created
+    status = sched.task_statuses()[0]
+    assert status["last_ok"] and status["exit_code"] == 0 and status["message"] == "done"
+    assert "hello from cron" in status["output"] and "second line" in status["output"]
+    log = sched.task_log(plan.id).read_text(encoding="utf-8")
+    assert "scheduled run" in log and "> echo hello from cron" in log and "=== done" in log
+    assert notes == []  # a scheduled success is quiet
+    assert sched.run_due() == []  # not due again for 5 minutes
+
+
+def test_failures_notify_once_and_recovery_notifies(tmp_path: Path) -> None:
+    sched, notes = task_scheduler(tmp_path)
+    plan = sched.save_task({"name": "Flaky", "command": "echo boom && exit 3", "cwd": str(tmp_path), "every": "1m"})
+    sched.run_due()
+    assert notes[-1][0] is False and notes[-1][1] == "Task Flaky failed" and "exit 3" in notes[-1][2] and "boom" in notes[-1][2]
+    assert notes[-1][3] == f"task-{plan.id}"  # the toast's "View log" opens this task's log
+    sched.run_due(now=time.time() + 61)
+    assert len(notes) == 1  # still failing: no second balloon
+    sched.save_task({"name": "Flaky", "command": "echo fixed", "cwd": str(tmp_path), "every": "1m"}, plan.id)
+    sched.run_due(now=time.time() + 200)
+    assert notes[-1][0] is True and "working again" in notes[-1][1]
+    sched.run_task_now(plan.id)
+    assert notes[-1][1] == "Task Flaky"  # manual runs always report
+
+
+def test_time_limit_kills_the_command(tmp_path: Path) -> None:
+    sched, _notes = task_scheduler(tmp_path)
+    plan = TaskPlan(id="t00aa11", name="Slow", command="ping -n 30 127.0.0.1 >nul", where="custom", cwd=str(tmp_path), timeout=2)
+    started = time.monotonic()
+    sched._running.add(f"task:{plan.id}")  # noqa: SLF001 - what run_due does before submitting
+    sched._run_task(plan, False)  # noqa: SLF001
+    assert time.monotonic() - started < 15
+    state = sched._state[f"task:{plan.id}"]  # noqa: SLF001
+    assert state.last_ok is False and "time limit" in state.message and state.exit_code is None
+
+
+def test_a_running_task_is_not_started_twice(tmp_path: Path) -> None:
+    sched, _ = task_scheduler(tmp_path)
+    plan = sched.save_task({"name": "Busy", "command": "echo x", "cwd": str(tmp_path), "every": "1m"})
+    sched._running.add(f"task:{plan.id}")  # noqa: SLF001 - pretend the last run is still going
+    assert sched.run_due() == []
+    with pytest.raises(Exception, match="already running"):
+        sched.run_task_now(plan.id)
+
+
+def test_tasks_persist_update_and_delete(tmp_path: Path) -> None:
+    sched, _ = task_scheduler(tmp_path)
+    plan = sched.save_task({"name": "Report", "command": "php report.php", "site": "bank.test", "every": "daily", "at": "02:30"})
+    again, _ = task_scheduler(tmp_path)
+    loaded = again.task(plan.id)
+    assert (loaded.command, loaded.at, loaded.site, loaded.since) == ("php report.php", "02:30", "bank.test", plan.since)
+    again.save_task({"name": "Report", "command": "php report.php --all", "site": "bank.test", "every": "daily", "at": "02:30"}, plan.id)
+    assert again.task(plan.id).since == plan.since  # same timing: schedule unchanged
+    again.delete_task(plan.id)
+    assert again.task_statuses() == []
+    with pytest.raises(KeyError):
+        again.task(plan.id)
+    with pytest.raises(KeyError):
+        again.task_log("../../x")
+
+
+def test_output_without_a_trailing_newline_is_kept_clean(tmp_path: Path) -> None:
+    sched, _ = task_scheduler(tmp_path)
+    plan = sched.save_task({"name": "No newline", "command": "<nul set /p =5.4.33& exit 0", "cwd": str(tmp_path), "every": "5m"})
+    sched.run_due()
+    assert sched.task_statuses()[0]["output"] == "5.4.33"
+    assert sched.task_log(plan.id).read_text(encoding="utf-8").splitlines()[-1].startswith("=== done")

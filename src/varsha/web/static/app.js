@@ -9,6 +9,7 @@ const VIEWS = {
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
+  tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
   share: { title: "Share", eyebrow: "cloudflare tunnel" },
   logs: { title: "Logs", eyebrow: "live output" },
   system: { title: "System", eyebrow: "php \u00b7 https \u00b7 dns \u00b7 folders" },
@@ -96,6 +97,7 @@ const homeTail = new LogTail("home-log", "apache");
 
 function logSourceList() {
   const list = S.services.filter((s) => s.state !== "disabled").map((s) => [s.id, s.name]);
+  for (const t of S.tasks || []) list.push([`task-${t.id}`, `Task: ${t.name}`]);
   list.push(["create", "Quick Create"], ["tunnel", "Tunnels"], ["varsha", "varsha itself"]);
   return list;
 }
@@ -160,7 +162,8 @@ function renderShell() {
   document.querySelectorAll(".nav-item").forEach((b) => {
     if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     b.querySelector(".nav-badge")?.remove();
-    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length, mail: S.mail.unread }[b.dataset.view];
+    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length, mail: S.mail.unread,
+                tasks: (S.tasks || []).filter((t) => t.enabled && t.last_ok === false).length }[b.dataset.view];
     if (n) b.insertAdjacentHTML("beforeend", `<span class="nav-badge">${n}</span>`);
   });
   $("#page-head").hidden = view === "stack";
@@ -404,7 +407,7 @@ async function autoBackupDialog(s) {
     <p>Backups go to <code>${esc(S.backup_root)}\\${esc(s.id)}</code>. Only automatic backups are cleaned up; your manual ones are kept.
       A backup missed while varsha or the database was off runs as soon as the database is running again.</p>
     <label class="check"><input type="checkbox" name="enabled" ${a.enabled ? "checked" : ""}> Back up automatically</label>
-    <div class="form-row">
+    <div class="form-row even">
       <label>How often<select class="input" name="every">${opts([["hourly", "Every hour"], ["6h", "Every 6 hours"], ["12h", "Every 12 hours"], ["daily", "Every day"], ["weekly", "Every week"]], a.every)}</select></label>
       <label>At (daily / weekly)<input class="input" type="time" name="at" value="${esc(a.at)}"></label>
       <label>Day (weekly)<select class="input" name="day">${opts(days.map((d, i) => [i, d]), a.day)}</select></label>
@@ -775,9 +778,121 @@ function onMailEvent(data) {
   for (const m of (data.new || []).slice(0, 3)) mailToast(m);
 }
 
+// ---------------------------------------------------------------- tasks view (cron)
+
+const TASK_TEMPLATES = [
+  { key: "laravel", label: "Laravel scheduler", hint: "Runs app/Console/Kernel or routes/console.php schedules",
+    task: { name: "Laravel scheduler", command: "php artisan schedule:run", every: "1m", where: "project" } },
+  { key: "queue", label: "Laravel queue", hint: "Processes waiting jobs, then exits",
+    task: { name: "Laravel queue", command: "php artisan queue:work --stop-when-empty --max-time=240", every: "5m", where: "project" } },
+  { key: "script", label: "PHP script", hint: "Any cron.php style script in a site",
+    task: { name: "PHP script", command: "php cron.php", every: "hourly", where: "project" } },
+  { key: "custom", label: "Custom command", hint: "Any command line (cmd.exe)",
+    task: { name: "", command: "", every: "daily", where: "project" } },
+];
+const EVERY_OPTIONS = [["1m", "Every minute"], ["5m", "Every 5 minutes"], ["15m", "Every 15 minutes"], ["30m", "Every 30 minutes"],
+  ["hourly", "Every hour"], ["6h", "Every 6 hours"], ["12h", "Every 12 hours"], ["daily", "Every day at\u2026"], ["weekly", "Every week on\u2026"]];
+const task = (id) => (S.tasks || []).find((t) => t.id === id);
+const fmtDuration = (s) => (s < 1 ? `${Math.round(s * 1000)} ms` : s < 60 ? `${s.toFixed(1)} s` : `${Math.floor(s / 60)} min ${Math.round(s % 60)} s`);
+
+function taskFolder(t) {
+  if (t.where === "custom") return t.cwd;
+  return `${t.site} \u00b7 ${t.where === "project" ? "project folder" : "www folder"}`;
+}
+
+function viewTasks() {
+  const tasks = S.tasks || [];
+  const head = `<div class="toolbar"><p class="muted">Run commands on a schedule, like cron on Linux: Laravel's scheduler, queue workers, cleanup scripts.
+      Each task runs with its site's PHP, composer and mysql on PATH. Tasks run only while varsha runs.</p>
+      <button class="btn btn-ink" data-act="task-new" data-ref="custom">+ New task</button></div>`;
+  const errors = S.schedule_error ? `<div class="banner banner-coral"><p><b>schedule.json couldn't be read:</b> ${esc(S.schedule_error)}</p></div>` : "";
+  const templates = `<div class="task-templates">${TASK_TEMPLATES.map((tpl) => `<button class="task-template" data-act="task-new" data-ref="${tpl.key}">
+      <b>${esc(tpl.label)}</b><span>${esc(tpl.hint)}</span></button>`).join("")}</div>`;
+  if (!tasks.length) {
+    return head + errors + `<div class="empty"><h3>No tasks yet</h3><p>Start from a template:</p>${templates}</div>`;
+  }
+  return head + errors + `<div class="task-grid">${tasks.map(taskCard).join("")}</div>
+    <h2 class="section-title">Add another</h2>${templates}`;
+}
+
+function taskCard(t) {
+  let status;
+  if (t.running) status = `<span class="chip chip-yellow">\u23f3 running\u2026</span>`;
+  else if (!t.enabled) status = `<span class="chip">paused</span>`;
+  else status = `<span class="muted">next ${esc(fmtWhen(t.next_due))}</span>`;
+  const last = t.last_run ? `<div class="task-last ${t.last_ok ? "ok" : "bad"}">${t.last_ok ? "\u2714" : "\u2716"} ${esc(fmtWhen(t.last_run))}
+      \u00b7 ${esc(t.message)} \u00b7 ${esc(fmtDuration(t.duration || 0))}</div>` : `<div class="task-last muted">Never ran yet</div>`;
+  return `<article class="card task-card${t.enabled ? "" : " paused"}${t.last_ok === false && t.enabled ? " failed" : ""}">
+      <div class="card-head"><h3 class="card-title">${esc(t.name)}</h3>
+        <button class="switch" role="switch" aria-checked="${t.enabled}" aria-label="${t.enabled ? "Pause" : "Resume"} ${esc(t.name)}"
+          data-act="task-toggle" data-id="${esc(t.id)}"></button></div>
+      <div class="row"><span class="chip chip-blue">${esc(t.describe)}</span>${status}</div>
+      <div class="conn"><code title="${esc(t.command)}">${esc(t.command)}</code></div>
+      <div class="muted task-where">\ud83d\udcc2 ${esc(taskFolder(t))}${t.php ? ` \u00b7 PHP ${esc(t.php)}` : ""}</div>
+      ${last}
+      ${t.output ? `<pre class="task-output">${esc(t.output)}</pre>` : ""}
+      <div class="row">
+        <button class="btn btn-sm btn-mint" data-act="task-run" data-id="${esc(t.id)}" ${t.running ? "disabled" : ""}>\u25b6 Run now</button>
+        <button class="btn btn-sm" data-act="task-edit" data-id="${esc(t.id)}">Edit\u2026</button>
+        <button class="btn btn-sm" data-act="view-log" data-id="task-${esc(t.id)}">Log</button>
+        <span class="grow"></span>
+        <button class="btn btn-sm btn-coral" data-act="task-delete" data-id="${esc(t.id)}">Delete</button>
+      </div>
+    </article>`;
+}
+
+function taskBody(form) {
+  const body = {
+    name: form.get("name"), command: form.get("command"), site: form.get("site") || "",
+    where: form.get("site") ? form.get("where") : "custom", cwd: form.get("cwd") || "",
+    php: form.get("php") || "", every: form.get("every"), at: form.get("at") || "00:00",
+    day: parseInt(form.get("day"), 10), timeout: parseInt(form.get("timeout"), 10) || 600, enabled: form.has("enabled"),
+  };
+  if (body.where === "custom" && !body.cwd) throw new Error("Choose a site, or type the full folder the command runs in.");
+  return body;
+}
+
+function taskDialog(existing, templateKey) {
+  const tpl = TASK_TEMPLATES.find((x) => x.key === templateKey) || TASK_TEMPLATES[3];
+  const t = existing || { ...tpl.task, site: S.sites[0]?.domain || "", cwd: "", php: "", at: "02:00", day: 6, timeout: 600, enabled: true };
+  const opts = (pairs, current) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(current) ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const sites = [["", "No site (custom folder)"], ...S.sites.map((s) => [s.domain, s.domain])];
+  const php = [["", "The site's PHP (or the default)"], ...usablePhp().map((p) => [p.version, `PHP ${p.label}`])];
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((d, i) => [i, d]);
+  dialog(`<h2>${existing ? "Edit task" : `New task \u00b7 ${esc(tpl.label)}`}</h2>
+    <label>Name<input class="input" name="name" value="${esc(t.name)}" maxlength="60" required placeholder="e.g. Banking nightly report"></label>
+    <label>Command<input class="input mono" name="command" value="${esc(t.command)}" required spellcheck="false"
+      placeholder="php artisan schedule:run"></label>
+    <div class="form-row even">
+      <label>Site<select class="input" name="site">${opts(sites, t.site)}</select></label>
+      <label>Runs in<select class="input" name="where">${opts([["project", "Project folder (where artisan / composer.json is)"], ["site", "The site's www folder"]], t.where === "custom" ? "project" : t.where)}</select></label>
+    </div>
+    <label>\u2026or a custom folder (used when no site is chosen)<input class="input mono" name="cwd" value="${esc(t.cwd)}" spellcheck="false" placeholder="D:\\Work\\scripts"></label>
+    <div class="form-row even">
+      <label>How often<select class="input" name="every">${opts(EVERY_OPTIONS, t.every)}</select></label>
+      <label>At (daily / weekly)<input class="input" type="time" name="at" value="${esc(t.at)}"></label>
+      <label>Day (weekly)<select class="input" name="day">${opts(days, t.day)}</select></label>
+    </div>
+    <div class="form-row even">
+      <label>PHP<select class="input" name="php">${opts(php, t.php)}</select></label>
+      <label>Time limit (seconds)<input class="input" type="number" name="timeout" min="10" max="86400" value="${esc(t.timeout)}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="enabled" ${t.enabled ? "checked" : ""}> Active
+      <small>A task never overlaps itself: if it's still running when it comes due again, that run is skipped.</small></label>
+    <div class="form-error"></div>
+    <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button>
+      ${existing ? "" : `<button class="btn" value="save-run">Save &amp; run now</button>`}<button class="btn btn-ink" value="ok">Save</button></div>`,
+  async (form, button) => {
+    const body = taskBody(form);
+    const saved = await api.post(existing ? `/api/tasks/${existing.id}` : "/api/tasks", body);
+    if (button === "save-run") await api.post(`/api/tasks/${saved.id}/run`);
+    toast({ ok: true, title: existing ? "Task saved" : "Task created", message: body.name });
+  });
+}
+
 // ---------------------------------------------------------------- render
 
-const RENDER = { sites: viewSites, databases: viewDatabases, share: viewShare, logs: viewLogs, system: viewSystem };
+const RENDER = { tasks: viewTasks, sites: viewSites, databases: viewDatabases, share: viewShare, logs: viewLogs, system: viewSystem };
 
 function render() {
   if (!S) return;
@@ -1064,6 +1179,20 @@ document.addEventListener("click", async (event) => {
     case "restore": restoreDialog(svc(id)); return;
     case "password": passwordDialog(svc(id)); return;
     case "autobackup": autoBackupDialog(svc(id)); return;
+    case "task-new": taskDialog(null, ref); return;
+    case "task-edit": taskDialog(task(id)); return;
+    case "task-run": await act(`/api/tasks/${id}/run`); return;
+    case "task-toggle": {
+      const t = task(id);
+      await act(`/api/tasks/${id}`, { ...t, enabled: !t.enabled });
+      return;
+    }
+    case "task-delete": {
+      const t = task(id);
+      confirmDialog(`Delete the task “${t.name}”?`, "It stops running. Its log file is kept in logs\\tasks.", "Delete",
+        async () => { await api.post(`/api/tasks/${id}/delete`); });
+      return;
+    }
     case "autobackup-run": await act(`/api/services/${id}/autobackup-run`); return;
     case "unshare": await act(`/api/tunnels/${id}/stop`); break;
     case "share-site": go("share"); $("#share-target").value = ref; $("#share-target").focus(); return;
@@ -1145,7 +1274,7 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.target.closest("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
-  const index = "1234567".indexOf(event.key);
+  const index = "12345678".indexOf(event.key);
   if (index >= 0) go(Object.keys(VIEWS)[index]);
   if (event.key === "Escape" && openMenu) { openMenu = null; render(); }
 });

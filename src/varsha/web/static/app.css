@@ -647,3 +647,31 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .ab-dbs legend { font-weight: 700; padding: 0 6px; }
 .ab-db-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 2px var(--s3);
   max-height: 200px; overflow: auto; padding: 4px 0 0 24px; }
+
+/* ------------------------------------------------------------------ tasks (cron) */
+
+.task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: var(--s5); }
+.task-card { display: flex; flex-direction: column; gap: var(--s3); }
+.task-card .card-head { margin-bottom: 0; }
+.task-card.paused { background: repeating-linear-gradient(135deg, var(--card) 0 12px, var(--paper) 12px 24px); }
+.task-card.failed { background: var(--coral-soft); }
+.task-where { font-size: 13px; overflow-wrap: anywhere; }
+.task-last { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.task-last.bad { color: var(--error-text); }
+.task-output {
+  margin: 0; max-height: 110px; overflow: auto; padding: var(--s2) var(--s3);
+  font: 12px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--term-bg); color: var(--term-text); border: var(--line-thin); border-radius: var(--radius-sm);
+}
+.task-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--s3); width: 100%; text-align: left; }
+.task-template {
+  display: flex; flex-direction: column; gap: 4px; padding: var(--s3) var(--s4); cursor: pointer;
+  background: var(--card); color: var(--text); border: var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-xs);
+  font: inherit; text-align: left; transition: transform .06s, box-shadow .06s;
+}
+.task-template:hover { transform: var(--lift); box-shadow: var(--shadow-sm); background: var(--yellow); }
+.task-template span { font-size: 12.5px; color: var(--muted); }
+.task-template:hover span { color: #3b392f; }
+.mono { font-family: var(--mono); }
+.form-row.even label, .form-row.even label:first-child { flex: 1 1 0; width: auto; min-width: 0; }
+.form-row.even .input { width: 100%; }

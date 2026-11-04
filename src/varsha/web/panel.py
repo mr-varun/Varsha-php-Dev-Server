@@ -95,7 +95,8 @@ class PanelApp:
         # Counter changes and newly arrived mail go out as "mail" events (badge, list, tray balloon).
         self.mail_watch = MailWatcher(self.mail, lambda data: self.events.publish("mail", data))
         self.scheduler = Scheduler(manager, self.databases, paths.config / "schedule.json",
-                                   paths.data / "schedule-state.json", notify=self._job_done)
+                                   paths.data / "schedule-state.json", notify=self._job_done,
+                                   prepare_task=self._prepare_task, logs_dir=paths.logs, background=True)
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -138,6 +139,38 @@ class PanelApp:
         """A scheduled job finished: a toast in the panel (failures also become tray balloons)."""
         self.events.publish("toast", {"ok": ok, "title": title, "message": message, "service": "" if ok else service_id})
         self.events.publish("state")
+
+    def _prepare_task(self, plan: Any) -> tuple[Path, dict[str, str], str]:
+        """Folder, environment and PHP for a scheduled task: the same PATH as varsha's terminal."""
+        site = self.tools.site(plan.site) if plan.site else None
+        if plan.php:
+            build = self.engine.find_php(plan.php)
+            if build is None:
+                raise ServiceError(f"No PHP {plan.php} in bin\\php")
+        else:
+            build = self.tools.php_for(site)
+        if plan.where == "custom":
+            cwd = Path(plan.cwd)
+        else:
+            assert site is not None  # parse_task guarantees a site unless the folder is custom
+            cwd = site.folder
+            real = site.folder.resolve()
+            # Sites often point straight at a public\ folder (a junction): artisan lives one level up.
+            if plan.where == "project" and real.name.lower() == "public":
+                cwd = real.parent
+        if not cwd.is_dir():
+            raise ServiceError(f"The folder {cwd} doesn't exist")
+        self.tools.write_shims(build)
+        env = dict(os.environ)
+        parts = [str(build.folder), str(self.paths.etc / "shims")]
+        mysql = self.tools.mysql_bin()
+        if mysql:
+            parts.append(str(mysql))
+        env["PATH"] = ";".join(parts + [env.get("PATH", "")])
+        env["PHPRC"] = str(self.engine.php_ini_dir(build))
+        env["COMPOSER_HOME"] = str(self.paths.data / "composer")
+        env["VARSHA_TASK"] = plan.id
+        return cwd, env, f"PHP {build.version}"
 
     def run_backup_now(self, service_id: str) -> None:
         self.manager.definition(service_id)  # unknown id -> KeyError -> 400
@@ -185,6 +218,7 @@ class PanelApp:
             },
             "busy": busy,
             "schedule_error": self.scheduler.load_error,
+            "tasks": self.scheduler.task_statuses(),
             "backup_root": str(self.databases.backup_root),
             "mail": {"available": self.mail.available, "service": self.mail.service_id,
                      "smtp_port": self.mail.smtp_port, "ui": self.mail.base_url, **self.mail_watch.snapshot},
@@ -292,6 +326,8 @@ class PanelApp:
             return self.tunnels.log_path
         if service_id == "create":
             return self.paths.logs / "create.log"
+        if service_id.startswith("task-"):
+            return self.scheduler.task_log(service_id[5:])
         return self.manager.status(service_id).log_path
 
     def read_log(self, service_id: str, offset: int) -> dict[str, Any]:

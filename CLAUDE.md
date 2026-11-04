@@ -48,6 +48,8 @@ There is no linter or type checker configured yet. Tests cover only non-GUI logi
 
 ## Windows gotchas already handled (keep them)
 
+- Never call `app.quit()` (or any PySide call that waits on the Qt thread) from a worker thread: it holds the GIL while waiting, and deadlocks with a Qt thread waiting on the GIL (it hung quit whenever no services needed stopping). Emit a queued signal instead (`_MainThread.exit_loop`). On quit, `arm_quit_watchdog` sets a faulthandler C-level timer (works even with the GIL held) that dumps all stacks to `logs/varsha-hang.log` and force-exits after 150 s (`VARSHA_QUIT_DEADLINE`).
+
 - Console Apache ignores `httpd -k stop`, which only reaches a Windows *service*. `signal_apache_shutdown` sets the named event `ap<parent pid>_shutdown` (verified with httpd 2.4.68). Apache's child `httpd.exe` holds the ports, so always kill the whole tree.
 - Port checks use psutil LISTEN entries plus a plain `bind()` test: no `SO_REUSEADDR` (it would steal ports) and no `SO_EXCLUSIVEADDRUSE` (it fails on TIME_WAIT). WinError 10013 means a Hyper-V/WSL excluded port range, and PID 4 means http.sys/IIS.
 - In a venv, `sys.executable` is a launcher that spawns the real python as a child. Tests use `sys._base_executable` so the PID owns the port.

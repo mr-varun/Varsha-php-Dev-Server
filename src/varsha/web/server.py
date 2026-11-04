@@ -411,6 +411,22 @@ class PanelHandler(BaseHTTPRequestHandler):
                 return message
 
             task(f"Create {name}.{app.settings.tld}", create, success=lambda msg: msg)
+        elif path == "/api/tasks":
+            plan = app.scheduler.save_task(body)
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"id": plan.id})
+        elif m := re.fullmatch(r"/api/tasks/(t[0-9a-f]{6})", path):
+            app.scheduler.save_task(body, m.group(1))
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"id": m.group(1)})
+        elif m := re.fullmatch(r"/api/tasks/(t[0-9a-f]{6})/delete", path):
+            app.scheduler.delete_task(m.group(1))
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"ok": True})
+        elif m := re.fullmatch(r"/api/tasks/(t[0-9a-f]{6})/run", path):
+            app.scheduler.run_task_now(m.group(1))
+            app.events.publish("state")
+            self._json(HTTPStatus.ACCEPTED, {"ok": True})
         elif path == "/api/mail/read":
             ids = body.get("ids") or []
             if not isinstance(ids, list):

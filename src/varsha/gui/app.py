@@ -7,14 +7,17 @@ http://127.0.0.1:<panel_port>/. Starting it a second time just reopens that pane
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import hashlib
 import json
 import logging
 import os
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QLockFile, QObject, Signal
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -36,6 +39,22 @@ from varsha.web.server import STATIC, bind_panel
 
 logger = logging.getLogger(__name__)
 
+QUIT_DEADLINE = int(os.environ.get("VARSHA_QUIT_DEADLINE", "150"))  # seconds from "quit" to a forced exit
+_hang_file: Any = None  # kept open for faulthandler's C-level timer
+
+
+def arm_quit_watchdog(paths: AppPaths) -> None:
+    """varsha must never hang on quit. faulthandler's timer runs in C, so it works even when a
+    thread is stuck in native code holding the GIL: after QUIT_DEADLINE seconds it writes every
+    thread's stack to logs/varsha-hang.log (so the cause can be fixed) and ends the process.
+    Stopping services takes at most stop_timeout per service, well inside the deadline."""
+    global _hang_file
+    _hang_file = open(paths.logs / "varsha-hang.log", "a", encoding="utf-8")  # noqa: SIM115 - must stay open
+    _hang_file.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} quit requested; "
+                     f"if this is followed by stacks, varsha hung for {QUIT_DEADLINE} s and was ended\n")
+    _hang_file.flush()
+    faulthandler.dump_traceback_later(QUIT_DEADLINE, exit=True, file=_hang_file)
+
 
 def launch_file(paths: AppPaths) -> Path:
     """Where the running instance leaves its panel login URL, for a second launch to reopen it.
@@ -50,6 +69,10 @@ class _MainThread(QObject):
 
     quit_requested = Signal(bool)
     notify = Signal(str, str, bool)
+    # Ends the Qt event loop. Worker threads must emit this instead of calling app.quit():
+    # app.quit() from a worker holds the GIL while it waits on the Qt thread, which can deadlock
+    # with a Qt thread that is waiting on the GIL (seen when quitting with no services to stop).
+    exit_loop = Signal()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,11 +163,12 @@ def main(argv: list[str] | None = None) -> int:
     threading.Thread(target=on_event_toast, name="tray-toasts", daemon=True).start()
 
     quitting = {"done": False}
-
     def shutdown(stop_services: bool) -> None:
         if quitting["done"]:
             return
         quitting["done"] = True
+        arm_quit_watchdog(paths)
+        logger.info("Quitting (%s)", "stopping services" if stop_services else "services keep running")
 
         def work() -> None:
             tunnels.stop_all()  # shared links never outlive varsha, even when services stay up
@@ -153,11 +177,13 @@ def main(argv: list[str] | None = None) -> int:
                     manager.stop_all()
                 except Exception:
                     logger.exception("Stopping services on quit failed")
-            app.quit()  # thread-safe: posts to the Qt event loop
+            logger.info("Services handled; closing")
+            main_thread.exit_loop.emit()  # queued to the Qt thread; never call app.quit() from here
 
         threading.Thread(target=work, name="quit", daemon=True).start()
 
     main_thread.quit_requested.connect(shutdown)
+    main_thread.exit_loop.connect(app.quit)
 
     manager.adopt_running()
     manager.start_monitor()
