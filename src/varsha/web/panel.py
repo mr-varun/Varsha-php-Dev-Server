@@ -262,8 +262,9 @@ class PanelApp:
         """The Data page's "Open file…": a native dialog, then the file is checked and remembered."""
         if self.folder_picker is None:
             raise ServiceError("The file dialog isn't available")
-        chosen = self.folder_picker("Open a SQLite database", "file",
-                                    "SQLite databases (*.db *.sqlite *.sqlite3 *.db3 *.s3db *.sl3);;All files (*)")
+        chosen = self.folder_picker("Open a database file", "file",
+                                    "Database files (*.db *.sqlite *.sqlite3 *.db3 *.s3db *.sl3 *.mdb *.accdb);;"
+                                    "SQLite (*.db *.sqlite *.sqlite3 *.db3 *.s3db *.sl3);;Access (*.mdb *.accdb);;All files (*)")
         return self.data.register(chosen) if chosen else None
 
     def shutdown(self) -> None:

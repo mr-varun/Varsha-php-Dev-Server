@@ -12,6 +12,8 @@ sys.path.insert(0, str(SRC))
 
 datas = [
     (str(SRC / "varsha" / "web" / "static"), "varsha/web/static"),
+    # run by path under a 32-bit Python (the Access ODBC driver is 32-bit), so it must be a real .py file
+    (str(SRC / "varsha" / "data" / "access_odbc.py"), "varsha/data"),
     (str(REPO / "etc" / "templates"), "etc/templates"),
     (str(REPO / "config" / "services.json"), "config"),
     (str(REPO / "config" / "settings.json"), "config"),

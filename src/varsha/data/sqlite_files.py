@@ -29,6 +29,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from varsha.data.access_files import ACCESS_EXTENSIONS, AccessError, AccessReader, engine_name, is_access
 from varsha.paths import AppPaths
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,7 @@ class DataFiles:
         self._edit: set[str] = set()
         self._backed_up: set[str] = set()
         self._lock = threading.Lock()
+        self.access = AccessReader(paths)
         for entry in self._load_recent():
             self._files[entry["id"]] = Path(entry["path"])
 
@@ -151,9 +153,16 @@ class DataFiles:
         data = self.paths.data.resolve()
         if path == data or data in path.parents:
             raise DataError("Files inside varsha's data folder (server databases, credentials) can't be opened here")
-        if not is_sqlite(path):
-            raise DataError(f"{path.name} isn't a SQLite database (a .db file can also be Paradox or another format)")
+        if not is_sqlite(path) and not is_access(path):
+            raise DataError(f"{path.name} isn't a SQLite or Access database (a .db file can also be Paradox or another format)")
         return path
+
+    def kind(self, file_id: str) -> str:
+        return "access" if is_access(self.path(file_id)) else "sqlite"
+
+    def _read_only_access(self, file_id: str) -> None:
+        if self.kind(file_id) == "access":
+            raise DataError("Access files are read-only in varsha (browse, search, query and export only)")
 
     def register(self, raw: str) -> dict[str, Any]:
         """A file the user picked: check it, remember it, return its id."""
@@ -164,12 +173,13 @@ class DataFiles:
             recent = [e for e in self._load_recent() if e["id"] != file_id]
             recent.insert(0, {"id": file_id, "path": str(path)})
             self._save_recent(recent[:MAX_RECENT])
-        return {"id": file_id, "name": path.name, "path": str(path)}
+        return {"id": file_id, "name": path.name, "path": str(path), "kind": self.kind(file_id)}
 
     def forget(self, file_id: str) -> None:
         with self._lock:
             self._save_recent([e for e in self._load_recent() if e["id"] != file_id])
             self._edit.discard(file_id)
+        self.access.forget(file_id)
 
     def path(self, file_id: str) -> Path:
         path = self._files.get(file_id)
@@ -225,7 +235,8 @@ class DataFiles:
                     if entry.is_dir():
                         if entry.name.lower() not in SCAN_SKIP and not entry.name.startswith("."):
                             walk(entry, depth + 1, site)
-                    elif entry.suffix.lower() in EXTENSIONS and is_sqlite(entry):
+                    elif (entry.suffix.lower() in EXTENSIONS and is_sqlite(entry)) or \
+                            (entry.suffix.lower() in ACCESS_EXTENSIONS and is_access(entry)):
                         path = entry.resolve()
                         file_id = self.file_id(path)
                         self._files.setdefault(file_id, path)
@@ -251,6 +262,8 @@ class DataFiles:
         return file_id in self._edit
 
     def set_edit(self, file_id: str, edit: bool) -> None:
+        if edit:
+            self._read_only_access(file_id)
         self.path(file_id)
         with self._lock:
             (self._edit.add if edit else self._edit.discard)(file_id)
@@ -258,6 +271,7 @@ class DataFiles:
     @contextmanager
     def connect(self, file_id: str, write: bool = False) -> Iterator[sqlite3.Connection]:
         path = self.path(file_id)
+        self._read_only_access(file_id)
         if write and file_id not in self._edit:
             raise DataError("This file is open read-only: switch on Edit to change it")
         if write and file_id not in self._backed_up:
@@ -320,8 +334,21 @@ class DataFiles:
         except sqlite3.OperationalError:
             return False  # WITHOUT ROWID
 
+    def _access(self, file_id: str, op: str, **request: Any) -> Any:
+        try:
+            return self.access.call(file_id, self.path(file_id), op, **request)
+        except AccessError as exc:
+            raise DataError(str(exc)) from exc
+
     def overview(self, file_id: str) -> dict[str, Any]:
         path = self.path(file_id)
+        if self.kind(file_id) == "access":
+            tables = self._access(file_id, "tables")["tables"]
+            _copy, taken = self.access.snapshot(file_id, path)
+            stat = path.stat()
+            return {"id": file_id, "name": path.name, "path": str(path), "size": stat.st_size, "modified": stat.st_mtime,
+                    "kind": "access", "engine": engine_name(path), "snapshot": taken, "edit": False, "tables": tables,
+                    "indexes": 0, "triggers": 0, "pragmas": {}, "backups": [], "sqlite": ""}
         with self.connect(file_id) as conn:
             objects = self._objects(conn)
             tables = []
@@ -338,12 +365,17 @@ class DataFiles:
                        for name in ("journal_mode", "page_size", "page_count", "user_version", "encoding")}
         stat = path.stat()
         return {"id": file_id, "name": path.name, "path": str(path), "size": stat.st_size, "modified": stat.st_mtime,
-                "sqlite": sqlite3.sqlite_version, "edit": self.edit_mode(file_id), "tables": tables,
+                "kind": "sqlite", "sqlite": sqlite3.sqlite_version, "edit": self.edit_mode(file_id), "tables": tables,
                 "indexes": sum(1 for o in objects if o["type"] == "index"),
                 "triggers": sum(1 for o in objects if o["type"] == "trigger"),
                 "pragmas": pragmas, "backups": self.backups(file_id)}
 
     def structure(self, file_id: str, table: str) -> dict[str, Any]:
+        if self.kind(file_id) == "access":
+            name = self._access_table(file_id, table)
+            info = self._access(file_id, "columns", table=name["name"])
+            return {"name": name["name"], "type": name["type"], "sql": "", "columns": info["columns"],
+                    "indexes": info["indexes"], "foreign_keys": [], "triggers": [], "rowid": False}
         with self.connect(file_id) as conn:
             obj = self._table(conn, table)
             name = obj["name"]
@@ -368,10 +400,23 @@ class DataFiles:
         pk = [c["name"] for c in sorted(columns, key=lambda c: c["pk"]) if c["pk"]]
         return pk or None
 
+    def _access_table(self, file_id: str, table: str) -> dict[str, Any]:
+        for t in self._access(file_id, "tables")["tables"]:
+            if t["name"].lower() == str(table).lower():
+                return t
+        raise DataError(f"No table or query named {table!r}")
+
     def rows(self, file_id: str, table: str, offset: int = 0, limit: int = PAGE_SIZE, order: str = "",
              desc: bool = False, search: str = "", column: str = "") -> dict[str, Any]:
         limit = max(1, min(int(limit), MAX_PAGE))
         offset = max(0, int(offset))
+        if self.kind(file_id) == "access":
+            obj = self._access_table(file_id, table)
+            page = self._access(file_id, "rows", table=obj["name"], offset=offset, limit=limit, order=order,
+                                desc=desc, search=search, column=column)
+            return {"table": obj["name"], "type": obj["type"], "columns": page["columns"], "editable": False,
+                    "rows": [{"key": None, "cells": r} for r in page["rows"]], "total": page["total"],
+                    "offset": offset, "limit": limit}
         with self.connect(file_id) as conn:
             obj = self._table(conn, table)
             name = obj["name"]
@@ -541,6 +586,11 @@ class DataFiles:
     # ------------------------------------------------------------------ SQL
 
     def run_sql(self, file_id: str, sql: str) -> dict[str, Any]:
+        if self.kind(file_id) == "access":
+            started = time.monotonic()
+            result = self._access(file_id, "query", sql=str(sql or ""))
+            return {"columns": result["columns"], "rows": result["rows"], "truncated": result["truncated"],
+                    "changed": 0, "statements": 1, "ms": round((time.monotonic() - started) * 1000, 1), "edit": False}
         statements = split_statements(str(sql or ""))
         if not statements:
             raise DataError("Type a SQL statement")
@@ -585,6 +635,7 @@ class DataFiles:
     def backup(self, file_id: str) -> str:
         """A consistent copy (SQLite's backup API, so a WAL file is included)."""
         path = self.path(file_id)
+        self._read_only_access(file_id)
         folder = self.backup_dir(file_id)
         folder.mkdir(parents=True, exist_ok=True)
         now = time.time()
@@ -643,6 +694,9 @@ class DataFiles:
         return f"{path.name} restored from {source.name} (the state before is kept as a new backup)"
 
     def integrity(self, file_id: str) -> str:
+        if self.kind(file_id) == "access":
+            tables = self._access(file_id, "tables")["tables"]
+            return f"Opened fine: {len(tables)} tables and queries readable"
         with self.connect(file_id) as conn:
             result = [r[0] for r in conn.execute("PRAGMA integrity_check(20)")]
             fk = conn.execute("PRAGMA foreign_key_check").fetchmany(20)
@@ -668,6 +722,10 @@ class DataFiles:
         return text.encode("utf-8"), f"{path.stem}.sql"
 
     def export_csv(self, file_id: str, table: str) -> tuple[bytes, str]:
+        if self.kind(file_id) == "access":
+            obj = self._access_table(file_id, table)
+            text = self._access(file_id, "csv", table=obj["name"])["csv"]
+            return ("\ufeff" + text).encode("utf-8"), f"{obj['name']}.csv"
         with self.connect(file_id) as conn:
             obj = self._table(conn, table)
             cursor = conn.execute(f"SELECT * FROM {quote(obj['name'])}")

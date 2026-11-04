@@ -45,7 +45,7 @@ def test_register_checks_the_file(setup: tuple[DataFiles, Path], tmp_path: Path)
     assert [r["id"] for r in files.listing()["recent"]] == [info["id"]]
     paradox = tmp_path / "old.db"
     paradox.write_bytes(b"\x05\x00not sqlite")
-    with pytest.raises(DataError, match="isn't a SQLite database"):
+    with pytest.raises(DataError, match="isn.t a SQLite or Access database"):
         files.register(str(paradox))
     inside = files.paths.data / "mysql.sqlite"
     inside.write_bytes(db.read_bytes())
