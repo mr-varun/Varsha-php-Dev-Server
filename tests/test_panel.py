@@ -140,3 +140,23 @@ def test_panel_port_cannot_be_shared(panel) -> None:  # type: ignore[no-untyped-
     app.tunnels._command = [str(Path(__file__))]  # noqa: SLF001 - "installed" without a real cloudflared
     with pytest.raises(TunnelError, match="control panel"):
         app.tunnels.start("localhost:8777")
+
+
+def test_a_refused_post_never_corrupts_the_next_request(panel) -> None:  # type: ignore[no-untyped-def]
+    """A stale tab (old login cookie) POSTs '{}': the refusal must not leave the body in the
+    keep-alive connection, where it became the start of the next request ("{}POST" -> 501)."""
+    import socket
+
+    _app, client = panel
+    port = client.server.port
+    host = f"127.0.0.1:{port}"
+    refused = (f"POST /api/remote-dbs/x/delete HTTP/1.1\r\nHost: {host}\r\nCookie: varsha_panel=stale\r\n"
+               f"X-Varsha: 1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{{}}")
+    follow_up = f"GET /api/state HTTP/1.1\r\nHost: {host}\r\nCookie: varsha_panel=stale\r\n\r\n"
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        sock.sendall((refused + follow_up).encode())
+        data = b""
+        while chunk := sock.recv(65536):
+            data += chunk
+    assert b"403" in data.split(b"\r\n", 1)[0] and b"login has expired" in data
+    assert b"501" not in data and b"Unsupported method" not in data

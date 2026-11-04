@@ -41,7 +41,11 @@ const pmaUrl = (s) => (s && s.pma_server ? `http://localhost/phpmyadmin/index.ph
 const api = {
   async get(path) {
     const r = await fetch(path, { credentials: "same-origin" });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    if (!r.ok) {
+      const err = new Error((await r.json().catch(() => ({}))).error || r.statusText);
+      err.status = r.status;
+      throw err;
+    }
     return r.json();
   },
   async post(path, body = {}, extra = {}) {
@@ -367,7 +371,138 @@ function viewDatabases() {
     <button class="btn btn-mint" data-act="start" data-id="apache">\u25b6 Start Apache</button></div>`;
   const local = list.length ? `<div class="db-grid db-row-3">${list.map(dbCard).join("")}</div>`
     : `<div class="empty"><h3>No local databases</h3><p>Add MySQL or MariaDB entries to <code>config\\services.json</code>.</p></div>`;
-  return note + local + remoteSection();
+  const tools = `<div class="toolbar"><p class="muted">Copy databases in from Laragon, WAMP, XAMPP or another server: the source is only read, and every table is checked afterwards.</p>
+      <button class="btn btn-ink" data-act="import-wizard">\u21e9 Import databases\u2026</button></div>`;
+  return note + tools + local + remoteSection();
+}
+
+// ---------------------------------------------------------------- import wizard
+
+async function importWizard() {
+  let stage = "source", session = null, poll = null;
+  const form = () => $("#dialog-form");
+  const cancelBtn = (label = "Cancel") => `<button class="btn" value="cancel" formnovalidate>${label}</button>`;
+  const sourceHtml = `<h2>Import databases</h2>
+    <p>Bring databases into varsha from another MySQL or MariaDB. <b>The source is never changed</b>: a data folder is copied first
+      and read from the copy.</p>
+    <div class="kinds kinds-2">
+      <label class="kind"><input type="radio" name="kind" value="folder" checked><b>A data folder</b><small>Laragon, WAMP, XAMPP or an old install. Its server can be stopped.</small></label>
+      <label class="kind"><input type="radio" name="kind" value="server"><b>A running server</b><small>Any MySQL/MariaDB you can log in to, local or remote.</small></label>
+    </div>
+    <div id="imp-folder">
+      <label>Data folder<input class="input mono" name="path" spellcheck="false" placeholder="e.g. D:\\backups\\mysql\\data (the folder with ibdata1 and mysql\\ inside)"></label>
+      <div class="imp-picks" id="imp-picks"><span class="muted">Looking for Laragon / WAMP / XAMPP folders\u2026</span></div>
+    </div>
+    <div id="imp-server" hidden>
+      <div class="form-row even"><label>Host<input class="input" name="host" value="127.0.0.1" spellcheck="false"></label>
+        <label>Port<input class="input" type="number" name="port" value="3306" min="1" max="65535"></label></div>
+      <div class="form-row even"><label>User<input class="input" name="user" value="root" spellcheck="false"></label>
+        <label>Password<input class="input" type="password" name="password" autocomplete="off"></label></div>
+    </div>
+    <div class="form-error"></div>
+    <div class="dialog-actions">${cancelBtn()}<button class="btn btn-ink" value="ok">Look inside \u2192</button></div>`;
+
+  function pickHtml(s) {
+    const running = dbs().filter((d) => d.state === "running");
+    const fam = { mariadb: "mariadb", mysql8: "mysql", mysql5: "mysql" }[s.family];
+    const preferred = running.find((d) => d.type === fam && (s.family !== "mysql5" || (d.version || "").startsWith("5")))
+      || running.find((d) => d.type === fam) || running[0];
+    const targets = dbs().map((d) => `<option value="${esc(d.id)}" ${d.state === "running" ? "" : "disabled"} ${preferred && d.id === preferred.id ? "selected" : ""}>
+      ${esc(d.name)} :${d.ports[0]}${d.state === "running" ? "" : " (stopped: start it first)"}</option>`).join("");
+    const rows = s.databases.map((d) => `<label class="imp-db"><input type="checkbox" name="db" value="${esc(d.name)}" checked>
+      <span class="mono grow">${esc(d.name)}</span><span class="muted">${d.tables} tables</span><span class="muted">${fmtBytes(d.size)}</span></label>`).join("");
+    return `<h2>Import from ${esc(s.kind === "folder" ? "folder" : s.label)}</h2>
+      <p class="row"><span class="chip chip-blue">${esc(s.family_label)}</span>${s.version ? `<span class="chip chip-mono">${esc(s.version)}</span>` : ""}
+        <span class="muted mono imp-label">${esc(s.label)}</span></p>
+      ${s.databases.length ? `<div class="row"><b class="grow">${plural(s.databases.length, "database")} found</b>
+          <button class="btn btn-sm" type="button" data-imp="all">All</button><button class="btn btn-sm" type="button" data-imp="none">None</button></div>
+        <div class="imp-dbs">${rows}</div>` : `<p class="muted">No databases in it (only system schemas).</p>`}
+      <label>Into<select class="input" name="target">${targets}</select></label>
+      ${preferred ? "" : `<p class="form-hint">No varsha database is running. Close this, start MariaDB or MySQL on the Databases page, then import: the databases go into a running server.</p>`}
+      <div class="kinds kinds-2">
+        <label class="kind"><input type="radio" name="mode" value="skip" checked><b>Skip existing</b><small>Databases that already exist in the target are left alone.</small></label>
+        <label class="kind"><input type="radio" name="mode" value="replace"><b>Replace existing</b><small>Same-named databases in the target are dropped and imported fresh.</small></label>
+      </div>
+      <div class="form-error"></div>
+      <div class="dialog-actions">${cancelBtn()}<button class="btn btn-ink" value="ok" ${preferred && s.databases.length ? "" : "disabled"}>\u21e9 Import</button></div>`;
+  }
+
+  function progressHtml(s) {
+    const icon = { ok: "\u2714", skipped: "\u21b7", failed: "\u2716", mismatch: "\u26a0" };
+    const report = s.report.length ? `<table class="imp-report"><tbody>${s.report.map((r) => `<tr class="imp-${esc(r.status)}">
+        <td>${icon[r.status] || "\u23f3"}</td><td class="mono">${esc(r.name)}</td><td>${esc(r.detail)}</td></tr>`).join("")}</tbody></table>` : "";
+    const done = s.state === "done" || s.state === "failed";
+    return `<h2>${done ? (s.state === "done" ? "Import finished" : "Import failed") : "Importing\u2026"}</h2>
+      ${s.error ? `<div class="banner banner-coral"><p>${esc(s.error)}</p></div>` : ""}
+      ${report}
+      <div class="terminal imp-log"><pre>${esc(s.log.join("\n"))}</pre></div>
+      ${done && s.dump_dir ? `<p class="muted">The dumps are kept as a safety copy in <code>${esc(s.dump_dir)}</code>.</p>` : ""}
+      <div class="dialog-actions">${done ? cancelBtn("Close") : `<span class="muted">This keeps running if you close the window.</span>${cancelBtn("Hide")}`}</div>`;
+  }
+
+  async function follow() {
+    clearTimeout(poll);
+    if (!$("#dialog").open || stage !== "progress") return;
+    try { session = await api.get(`/api/import/${session.id}`); } catch { return; }
+    form().innerHTML = progressHtml(session);
+    const pre = form().querySelector(".imp-log pre");
+    if (pre) pre.scrollTop = pre.scrollHeight;
+    if (session.state === "running" || session.state === "ready") poll = setTimeout(follow, 1000);
+    else refresh();
+  }
+
+  dialog(sourceHtml, async (data) => {
+    if (stage === "source") {
+      const kind = data.get("kind");
+      const body = kind === "folder" ? { kind, path: (data.get("path") || "").trim() }
+        : { kind, host: data.get("host"), port: parseInt(data.get("port"), 10) || 3306, user: data.get("user"), password: data.get("password") };
+      if (kind === "folder" && !body.path) throw new Error("Type or pick the data folder.");
+      session = await api.post("/api/import/inspect", body);
+      stage = "pick";
+      form().innerHTML = pickHtml(session);
+      return false;
+    }
+    if (stage === "pick") {
+      const names = data.getAll("db");
+      if (!names.length) throw new Error("Tick at least one database.");
+      await api.post(`/api/import/${session.id}/run`, { databases: names, target: data.get("target"), mode: data.get("mode") });
+      stage = "progress";
+      form().innerHTML = progressHtml({ ...session, state: "running", log: ["Starting\u2026"], report: [], error: "" });
+      follow();
+      return false;
+    }
+    return false;
+  });
+
+  // The dialog's <form> is shared by every dialog: these listeners remove themselves on close.
+  const box = form();
+  const onChange = (event) => {
+    if (event.target.name === "kind" && $("#imp-folder")) {
+      $("#imp-folder").hidden = event.target.value !== "folder";
+      $("#imp-server").hidden = event.target.value !== "server";
+    }
+  };
+  const onClick = (event) => {
+    const pick = event.target.closest("[data-pick]");
+    if (pick) { box.querySelector("[name=path]").value = pick.dataset.pick; return; }
+    const all = event.target.closest("[data-imp]");
+    if (all) box.querySelectorAll("input[name=db]").forEach((c) => { c.checked = all.dataset.imp === "all"; });
+  };
+  box.addEventListener("change", onChange);
+  box.addEventListener("click", onClick);
+  $("#dialog").addEventListener("close", () => {
+    box.removeEventListener("change", onChange);
+    box.removeEventListener("click", onClick);
+    clearTimeout(poll);
+    stage = "closed";
+  }, { once: true });
+  try {
+    const picks = await api.get("/api/import/suggest");
+    const el = $("#imp-picks");
+    if (el) el.innerHTML = picks.length ? `<span class="muted">Quick picks:</span>${picks.map((p) => `<button class="chip imp-pick" type="button" data-pick="${esc(p.path)}"
+        title="${esc(p.family)} ${esc(p.version)}${p.recent ? " \u00b7 used before" : ""}">${p.recent ? "\u21ba " : ""}${esc(p.path)} <span class="muted">\u00b7 ${p.databases} db</span></button>`).join("")}`
+      : `<span class="muted">No Laragon / WAMP / XAMPP data folders found in the usual places. Type the path; folders you import from are remembered here.</span>`;
+  } catch { /* the field still works */ }
 }
 
 function dbCard(s) {
@@ -956,8 +1091,13 @@ async function refresh() {
     S = await api.get("/api/state");
     $("#offline").hidden = true;
     render();
-  } catch {
-    $("#offline").hidden = false;
+  } catch (err) {
+    const banner = $("#offline");
+    // 401: varsha is running but this tab's login belongs to an earlier run (each run has a new one).
+    banner.textContent = err.status === 401
+      ? "This tab's login has expired because varsha was restarted. Open the control panel again from the varsha tray icon (right-click → Open control panel)."
+      : "Lost contact with varsha. Is it still running? Reconnecting…";
+    banner.hidden = false;
   }
 }
 
@@ -1207,6 +1347,7 @@ document.addEventListener("click", async (event) => {
     case "restore": restoreDialog(svc(id)); return;
     case "password": passwordDialog(svc(id)); return;
     case "autobackup": autoBackupDialog(svc(id)); return;
+    case "import-wizard": importWizard(); return;
     case "task-new": taskDialog(null, ref); return;
     case "task-edit": taskDialog(task(id)); return;
     case "task-run": await act(`/api/tasks/${id}/run`); return;

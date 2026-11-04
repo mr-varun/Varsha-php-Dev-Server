@@ -29,6 +29,7 @@ from varsha.paths import AppPaths
 from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
+from varsha.services.importer import Importer
 from varsha.services.manager import ServiceManager
 from varsha.services.models import ServiceState
 from varsha.services.remote import RemoteDbStore, test_connection, validate
@@ -94,6 +95,8 @@ class PanelApp:
         self.mail = MailpitClient(manager)
         # Counter changes and newly arrived mail go out as "mail" events (badge, list, tray balloon).
         self.mail_watch = MailWatcher(self.mail, lambda data: self.events.publish("mail", data))
+        self.importer = Importer(manager, self.databases, paths.data / "import",
+                                 notify=lambda ok, title, message: self._job_done(ok, title, message, ""))
         self.scheduler = Scheduler(manager, self.databases, paths.config / "schedule.json",
                                    paths.data / "schedule-state.json", notify=self._job_done,
                                    prepare_task=self._prepare_task, logs_dir=paths.logs, background=True)
@@ -171,6 +174,37 @@ class PanelApp:
         env["COMPOSER_HOME"] = str(self.paths.data / "composer")
         env["VARSHA_TASK"] = plan.id
         return cwd, env, f"PHP {build.version}"
+
+    def import_inspect(self, body: dict[str, Any]) -> dict[str, Any]:
+        if body.get("kind") == "folder":
+            session = self.importer.inspect_folder(str(body.get("path") or ""))
+        elif body.get("kind") == "server":
+            session = self.importer.inspect_server(str(body.get("host") or ""), int(body.get("port") or 3306),
+                                                   str(body.get("user") or ""), str(body.get("password") or ""))
+        else:
+            raise ValueError('kind must be "folder" or "server"')
+        return session.public()
+
+    def import_run(self, session_id: str, body: dict[str, Any]) -> None:
+        names = body.get("databases") or []
+        if not isinstance(names, list):
+            raise ValueError("databases must be a list")
+        session = self.importer.session(session_id)
+        if session.state == "running":
+            raise ServiceError("This import is already running")
+        session.state = "running"  # visible at once; run() does the real checks
+        self.events.publish("state")
+        self._pool.submit(self._import_job, session_id, [str(n) for n in names],
+                          str(body.get("target") or ""), str(body.get("mode") or "skip"))
+
+    def _import_job(self, session_id: str, names: list[str], target: str, mode: str) -> None:
+        session = self.importer.session(session_id)
+        session.state = "ready"
+        try:
+            self.importer.run(session_id, names, target, mode)
+        except Exception as exc:  # validation errors before the import starts
+            session.state, session.error = "failed", str(exc)
+            self._job_done(False, "Import", str(exc), "")
 
     def run_backup_now(self, service_id: str) -> None:
         self.manager.definition(service_id)  # unknown id -> KeyError -> 400

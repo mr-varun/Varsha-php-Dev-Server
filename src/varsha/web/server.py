@@ -183,6 +183,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/import/suggest":
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.importer.suggestions()))
+        elif m := re.fullmatch(r"/api/import/([0-9a-f]{12})", parts.path):
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.importer.session(m.group(1)).public()))
         elif parts.path.startswith("/api/mail/"):
             self._guarded(lambda: self._mail_get(parts.path, query))
         else:
@@ -264,25 +268,36 @@ class PanelHandler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------------ POST
 
+    def _refuse(self, status: int, message: str) -> None:
+        """Answer a POST we won't process. Its body must not stay in the connection: on a
+        keep-alive connection it would be read as the start of the next request ("{}POST ...")."""
+        self.close_connection = True
+        self._error(status, message)
+
     def do_POST(self) -> None:  # noqa: N802
         if not self._host_ok():
-            self._error(HTTPStatus.MISDIRECTED_REQUEST, "wrong Host")
+            self._refuse(HTTPStatus.MISDIRECTED_REQUEST, "wrong Host")
             return
-        if not self._authed() or self.headers.get("X-Varsha") != "1":
-            self._error(HTTPStatus.FORBIDDEN, "not allowed")
+        if not self._authed():
+            self._refuse(HTTPStatus.FORBIDDEN, "This page's login has expired (varsha was restarted). "
+                                               "Open the control panel again from the varsha tray icon.")
+            return
+        if self.headers.get("X-Varsha") != "1":
+            self._refuse(HTTPStatus.FORBIDDEN, "not allowed")
             return
         origin = self.headers.get("Origin")
         if origin and urlsplit(origin).netloc.lower() not in self.server.allowed_hosts:
-            self._error(HTTPStatus.FORBIDDEN, "cross-origin request refused")
+            self._refuse(HTTPStatus.FORBIDDEN, "cross-origin request refused")
             return
         path = urlsplit(self.path).path
         if m := re.fullmatch(r"/api/services/([a-z0-9._-]+)/restore-upload", path):
+            self.close_connection = True  # a refused upload leaves its (large) body unread
             self._guarded(lambda: self._restore_upload(m.group(1)))
             return
         try:
             body = self._body_json()
         except (ValueError, json.JSONDecodeError) as exc:
-            self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            self._refuse(HTTPStatus.BAD_REQUEST, str(exc))  # the body may be only partly read
             return
         self._guarded(lambda: self._post(path, body))
 
@@ -411,6 +426,11 @@ class PanelHandler(BaseHTTPRequestHandler):
                 return message
 
             task(f"Create {name}.{app.settings.tld}", create, success=lambda msg: msg)
+        elif path == "/api/import/inspect":
+            self._json(HTTPStatus.OK, app.import_inspect(body))
+        elif m := re.fullmatch(r"/api/import/([0-9a-f]{12})/run", path):
+            app.import_run(m.group(1), body)
+            self._json(HTTPStatus.ACCEPTED, {"ok": True})
         elif path == "/api/tasks":
             plan = app.scheduler.save_task(body)
             app.events.publish("state")
