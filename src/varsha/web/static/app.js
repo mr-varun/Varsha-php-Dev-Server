@@ -225,6 +225,29 @@ function homeSkeleton() {
     </div>`;
 }
 
+// Home "Sites in www" tile: 4 sites per page with ‹ › arrows (no scroll bar). The page survives
+// the constant state refreshes and is clamped when sites come or go.
+const HOME_SITES_PER_PAGE = 4;
+let homeSitesPageNo = 0;
+const homeSitesPages = (count) => Math.max(1, Math.ceil(count / HOME_SITES_PER_PAGE));
+
+function homeSitesPage(sites) {
+  homeSitesPageNo = Math.min(homeSitesPageNo, homeSitesPages(sites.length) - 1);
+  const start = homeSitesPageNo * HOME_SITES_PER_PAGE;
+  return sites.slice(start, start + HOME_SITES_PER_PAGE);
+}
+
+function sitesPager(count) {
+  const pages = homeSitesPages(count);
+  if (pages < 2) return "";
+  const first = homeSitesPageNo * HOME_SITES_PER_PAGE + 1, last = Math.min(count, first + HOME_SITES_PER_PAGE - 1);
+  return `<div class="sites-pager">
+      <button class="pager-btn" data-act="sites-page" data-ref="-1" ${homeSitesPageNo === 0 ? "disabled" : ""} aria-label="Previous sites">‹</button>
+      <span class="pager-info">${first}–${last} of ${count}</span>
+      <button class="pager-btn" data-act="sites-page" data-ref="1" ${homeSitesPageNo >= pages - 1 ? "disabled" : ""} aria-label="Next sites">›</button>
+    </div>`;
+}
+
 function fillHome() {
   const usable = S.services.filter((s) => !OFF.has(s.state));
   const running = usable.filter((s) => s.state === "running").length;
@@ -245,9 +268,9 @@ function fillHome() {
   $("#home-sites").innerHTML = `<div class="hero-count"><span class="hero-num">${sites.length}</span><span class="hero-sub">folder${sites.length === 1 ? "" : "s"} \u2192 *.${esc(S.tld)}</span></div>
     ${S.system.hosts_missing.length ? `<div class="row"><span class="chip chip-yellow">${plural(S.system.hosts_missing.length, "name")} not in hosts</span>
       <button class="btn btn-sm btn-ink" data-act="hosts">Fix (admin)</button></div>` : ""}
-    ${sites.length ? `<div class="site-rows">${sites.slice(0, 5).map((site) => `<a class="site-row" href="${esc(site.url)}" target="_blank" rel="noopener">
+    ${sites.length ? `<div class="site-rows">${homeSitesPage(sites).map((site) => `<a class="site-row" href="${esc(site.url)}" target="_blank" rel="noopener">
         <strong>${esc(site.domain)}</strong><span class="chip chip-mono" title="${esc(site.php_label)}">php ${esc(site.php_label.split(" ")[0])}</span>${siteChips(site)}</a>`).join("")}</div>
-      ${sites.length > 5 ? `<button class="tile-link" data-act="goto" data-view="sites">+ ${sites.length - 5} more</button>` : ""}`
+      ${sitesPager(sites.length)}`
       : `<div class="hero-empty">Make a folder in <code>www\\</code>, e.g. <code>www\\shop</code>, and <b>shop.${esc(S.tld)}</b> appears here.
          <div class="row"><button class="btn btn-sm btn-yellow" data-act="open" data-what="www">Open www folder</button></div></div>`}`;
 
@@ -1221,6 +1244,7 @@ document.addEventListener("click", async (event) => {
     case "php-config": phpDialog(id); return;
     case "ini-add": $("#ini-rows").insertAdjacentHTML("beforeend", iniRow("", "", $("#ini-rows").children.length)); return;
     case "quit": quitDialog(); return;
+    case "sites-page": homeSitesPageNo = Math.max(0, homeSitesPageNo + Number(ref)); fillHome(); return;
     case "mail-open": openMail(id); return;
     case "mail-home-open": el.closest(".toast")?.remove(); if (view !== "mail") go("mail"); openMail(id); return;
     case "mail-refresh": loadMail(); return;

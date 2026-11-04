@@ -692,3 +692,27 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .db-row-3 .auto-backup > .row { grid-column: 2; grid-row: 1 / span 3; flex-direction: column; align-items: stretch; }
 @media (max-width: 1100px) { .db-grid.db-row-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .db-grid.db-row-3 { grid-template-columns: 1fr; } }
+
+/* home: page through the sites with arrows instead of a scroll bar */
+.sites-pager { display: flex; align-items: center; gap: var(--s2); margin-top: auto; }
+.pager-btn {
+  width: 34px; height: 34px; display: grid; place-items: center; padding: 0 0 3px;
+  background: var(--yellow); color: #121212; border: var(--line-thin); border-color: #121212; border-radius: 50%;
+  box-shadow: 2px 2px 0 #121212; font: 700 22px/1 var(--font); cursor: pointer; transition: transform .06s, box-shadow .06s;
+}
+.pager-btn:hover:not(:disabled) { transform: var(--lift); box-shadow: 3px 3px 0 #121212; }
+.pager-btn:active:not(:disabled) { transform: var(--press); box-shadow: none; }
+.pager-btn:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+.pager-info { font: 700 13px var(--mono); min-width: 74px; text-align: center; }
+.t-sites .pager-info { color: #fff; }
+
+/* log text: terminal green (Logs page, home live log, task output) */
+:root { --log-text: #4ade80; }
+.terminal pre, .task-output { color: var(--log-text); }
+.terminal pre::selection, .task-output::selection { background: #4ade80; color: #0f1115; }
+/* buttons on the dark log bar keep dark text (they inherited the terminal's light colour) */
+.terminal-bar .btn { color: #121212; }
+.terminal-bar .btn-ink { color: var(--inverse-text); }
+/* home site rows: in a narrow tile the badges wrap instead of squeezing the site name to one letter */
+.site-row { flex-wrap: wrap; }
+.site-row strong { min-width: 140px; }
