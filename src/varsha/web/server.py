@@ -183,6 +183,9 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/php-errors":
+            arg = lambda name: (query.get(name) or [""])[0]  # noqa: E731
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_errors.groups(arg("severity"), arg("site"), arg("q"))))
         elif parts.path == "/api/import/suggest":
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.importer.suggestions()))
         elif m := re.fullmatch(r"/api/import/([0-9a-f]{12})", parts.path):
@@ -426,6 +429,28 @@ class PanelHandler(BaseHTTPRequestHandler):
                 return message
 
             task(f"Create {name}.{app.settings.tld}", create, success=lambda msg: msg)
+        elif path in ("/api/php-errors/seen", "/api/php-errors/clear", "/api/php-errors/settings"):
+            errors = app.php_errors
+            if path.endswith("seen"):
+                errors.mark_seen()
+            elif path.endswith("clear"):
+                errors.clear()
+            else:
+                errors.set_notify(str(body.get("notify", "")))
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"ok": True})
+        elif m := re.fullmatch(r"/api/php-errors/([0-9a-f]{12})/(dismiss|mute|unmute|open)", path):
+            gid, action = m.group(1), m.group(2)
+            message = "ok"
+            if action == "dismiss":
+                app.php_errors.dismiss(gid)
+            elif action in ("mute", "unmute"):
+                app.php_errors.group(gid)
+                app.php_errors.set_muted(gid, action == "mute")
+            else:
+                message = app.open_php_error(gid)
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"message": message})
         elif path == "/api/import/inspect":
             self._json(HTTPStatus.OK, app.import_inspect(body))
         elif m := re.fullmatch(r"/api/import/([0-9a-f]{12})/run", path):

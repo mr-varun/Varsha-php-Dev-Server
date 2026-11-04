@@ -26,6 +26,7 @@ from varsha.devtools import DevTools
 from varsha.errors import ConfigError, ServiceError, VarshaError
 from varsha.mail.mailpit import MailpitClient, MailWatcher
 from varsha.paths import AppPaths
+from varsha.php.errors import PhpErrorWatcher
 from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
@@ -95,6 +96,9 @@ class PanelApp:
         self.mail = MailpitClient(manager)
         # Counter changes and newly arrived mail go out as "mail" events (badge, list, tray balloon).
         self.mail_watch = MailWatcher(self.mail, lambda data: self.events.publish("mail", data))
+        self.php_errors = PhpErrorWatcher(paths.logs, paths.config / "php-errors.json",
+                                          site_roots=self._site_roots,
+                                          on_event=lambda data: self.events.publish("php_error", data))
         self.importer = Importer(manager, self.databases, paths.data / "import",
                                  notify=lambda ok, title, message: self._job_done(ok, title, message, ""))
         self.scheduler = Scheduler(manager, self.databases, paths.config / "schedule.json",
@@ -175,6 +179,29 @@ class PanelApp:
         env["VARSHA_TASK"] = plan.id
         return cwd, env, f"PHP {build.version}"
 
+    def _site_roots(self) -> list[tuple[str, Path]]:
+        try:
+            return [(s.domain, s.folder) for s in self.sites.sites()]
+        except Exception:  # a broken sites.json must not stop the error watcher
+            return []
+
+    def open_php_error(self, group_id: str) -> str:
+        """Open the file of an error at its line: VS Code if installed, else Explorer on the file."""
+        group = self.php_errors.group(group_id)
+        target = Path(group.file)
+        if not group.file or not target.is_file():
+            raise ServiceError(f"The file {group.file or '(unknown)'} no longer exists")
+        local = Path(os.environ.get("LOCALAPPDATA", ""))
+        candidates = [local / "Programs" / "Microsoft VS Code" / "bin" / "code.cmd",
+                      Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft VS Code" / "bin" / "code.cmd"]
+        code = next((c for c in candidates if c.is_file()), None)
+        if code is not None:
+            subprocess.Popen(["cmd.exe", "/c", str(code), "-g", f"{target}:{max(1, group.line)}"],
+                             creationflags=proc_utils.CREATE_NO_WINDOW, close_fds=True)
+            return f"Opened {target.name}:{group.line} in VS Code"
+        subprocess.Popen(["explorer.exe", f"/select,{target}"], close_fds=True)
+        return f"Showing {target.name} in Explorer (VS Code not found)"
+
     def import_inspect(self, body: dict[str, Any]) -> dict[str, Any]:
         if body.get("kind") == "folder":
             session = self.importer.inspect_folder(str(body.get("path") or ""))
@@ -212,6 +239,7 @@ class PanelApp:
         self._pool.submit(self.scheduler.run_now, service_id)
 
     def shutdown(self) -> None:
+        self.php_errors.stop()
         self.scheduler.stop()
         self.mail_watch.stop()
         self.events.close()
@@ -252,6 +280,7 @@ class PanelApp:
             },
             "busy": busy,
             "schedule_error": self.scheduler.load_error,
+            "php_errors": self.php_errors.summary(),
             "tasks": self.scheduler.task_statuses(),
             "backup_root": str(self.databases.backup_root),
             "mail": {"available": self.mail.available, "service": self.mail.service_id,

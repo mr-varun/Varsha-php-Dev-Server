@@ -9,6 +9,7 @@ const VIEWS = {
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
+  errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
   share: { title: "Share", eyebrow: "cloudflare tunnel" },
   logs: { title: "Logs", eyebrow: "live output" },
@@ -167,7 +168,8 @@ function renderShell() {
     if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     b.querySelector(".nav-badge")?.remove();
     const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length, mail: S.mail.unread,
-                tasks: (S.tasks || []).filter((t) => t.enabled && t.last_ok === false).length }[b.dataset.view];
+                tasks: (S.tasks || []).filter((t) => t.enabled && t.last_ok === false).length,
+                errors: S.php_errors ? S.php_errors.unseen_errors + S.php_errors.unseen_warnings : 0 }[b.dataset.view];
     if (n) b.insertAdjacentHTML("beforeend", `<span class="nav-badge">${n}</span>`);
   });
   $("#page-head").hidden = view === "stack";
@@ -307,7 +309,8 @@ function fillHome() {
     <div class="sys-row"><b>PHP</b>${S.php.map((p) => `<span class="php-chip${p.default ? " default" : ""}" title="${esc(p.label)}">${esc(p.version)}</span>`).join("")}</div>
     <div class="sys-row"><b>HTTPS</b>${https}</div>
     <div class="sys-row"><b>Hosts</b><span class="chip ${sys.hosts_in_sync ? "chip-mint" : "chip-yellow"}">${sys.hosts_in_sync ? "in sync" : plural(sys.hosts_missing.length, "name") + " missing"}</span></div>
-    <div class="sys-row"><b>DNS</b><span class="chip ${sys.dns_route ? "chip-mint" : ""}">.${esc(S.tld)} route ${sys.dns_route ? "on" : "off"}</span></div>`;
+    <div class="sys-row"><b>DNS</b><span class="chip ${sys.dns_route ? "chip-mint" : ""}">.${esc(S.tld)} route ${sys.dns_route ? "on" : "off"}</span></div>
+    <div class="sys-row"><b>Errors</b>${homeErrorsChip()}</div>`;
 
   const select = $("#home-log-src");
   const current = select.value;
@@ -939,6 +942,108 @@ function onMailEvent(data) {
   for (const m of (data.new || []).slice(0, 3)) mailToast(m);
 }
 
+// ---------------------------------------------------------------- PHP errors view
+// Like the Mail view, it is built once and refreshed in place (filters and open stack traces stay).
+
+const ERR = { severity: "", site: "", q: "", list: [], open: new Set() };
+const SEV_LABEL = { error: "Errors", warning: "Warnings", notice: "Notices" };
+
+function homeErrorsChip() {
+  const e = S.php_errors || { unseen_errors: 0, unseen_warnings: 0 };
+  if (e.unseen_errors) return `<button class="chip chip-coral" data-act="goto" data-view="errors">${plural(e.unseen_errors, "new error")}</button>`;
+  if (e.unseen_warnings) return `<button class="chip chip-yellow" data-act="goto" data-view="errors">${plural(e.unseen_warnings, "new warning")}</button>`;
+  return `<span class="chip chip-mint">none new</span>`;
+}
+
+function viewErrorsSkeleton() {
+  const e = S.php_errors || { notify: "errors" };
+  const sites = [["", "All sites"], ...S.sites.map((s) => [s.domain, s.domain]), ["-", "Not in a site"]];
+  return `<div class="errors" id="errors">
+      <div class="err-bar">
+        <div class="seg" role="group" aria-label="Severity">${[["", "All"], ["error", "Errors"], ["warning", "Warnings"], ["notice", "Notices"]]
+          .map(([v, l]) => `<button class="seg-btn" data-act="err-filter" data-ref="${v}" aria-pressed="${ERR.severity === v}">${l}</button>`).join("")}</div>
+        <select class="select" id="err-site" aria-label="Site">${sites.map(([v, l]) => `<option value="${esc(v)}" ${ERR.site === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <input class="input err-search" id="err-q" value="${esc(ERR.q)}" placeholder="Search message or file" autocomplete="off" spellcheck="false" aria-label="Search errors">
+        <span class="grow"></span>
+        <label class="err-notify">Alert me for
+          <select class="select" id="err-notify">${[["errors", "fatal errors"], ["warnings", "errors + warnings"], ["off", "nothing"]]
+            .map(([v, l]) => `<option value="${v}" ${e.notify === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+        <button class="btn btn-sm btn-coral" data-act="err-clear">Clear all</button>
+      </div>
+      <div id="err-list"></div>
+    </div>`;
+}
+
+function errRow(g) {
+  const trace = g.detail && g.detail.includes("\n");
+  const where = g.file ? `<span class="mono err-file" title="${esc(g.file)}">${esc(g.file_name)}:${g.line}</span>` : "";
+  return `<article class="err-row sev-${esc(g.severity)}${g.seen ? "" : " unseen"}${g.muted ? " muted" : ""}">
+      <div class="err-top">
+        <span class="err-level">${esc(g.level)}</span>
+        ${g.site ? `<span class="chip chip-blue">${esc(g.site)}</span>` : `<span class="chip">no site</span>`}
+        ${where}
+        ${g.count > 1 ? `<span class="chip chip-ink">×${g.count}</span>` : ""}
+        <span class="grow"></span>
+        <span class="muted err-time" title="first ${esc(fmtDate(g.first_seen))}">${esc(mailTime(new Date(g.last_seen * 1000).toISOString()))}</span>
+      </div>
+      <div class="err-msg">${esc(g.message)}</div>
+      ${g.file ? `<div class="muted mono err-path">${esc(g.file)}</div>` : ""}
+      ${trace ? `<details class="err-trace" data-id="${esc(g.id)}" ${ERR.open.has(g.id) ? "open" : ""}><summary>Stack trace</summary><pre>${esc(g.detail)}</pre></details>` : ""}
+      <div class="row err-actions">
+        ${g.file ? `<button class="btn btn-sm btn-blue" data-act="err-open" data-id="${esc(g.id)}">Open in VS Code</button>` : ""}
+        <button class="btn btn-sm" data-act="${g.muted ? "err-unmute" : "err-mute"}" data-id="${esc(g.id)}" title="${g.muted ? "Alert for it again" : "No more alerts for this one"}">${g.muted ? "Unmute" : "Mute alerts"}</button>
+        <button class="btn btn-sm btn-ghost" data-act="err-dismiss" data-id="${esc(g.id)}">Dismiss</button>
+      </div>
+    </article>`;
+}
+
+async function loadErrors() {
+  const box = $("#err-list");
+  if (!box) return;
+  const site = ERR.site === "-" ? "" : ERR.site;
+  try {
+    let list = await api.get(`/api/php-errors?severity=${encodeURIComponent(ERR.severity)}&site=${encodeURIComponent(site)}&q=${encodeURIComponent(ERR.q)}`);
+    if (ERR.site === "-") list = list.filter((g) => !g.site);
+    ERR.list = list;
+  } catch (err) {
+    box.innerHTML = `<div class="empty"><h3>Couldn't load the errors</h3><p>${esc(err.message)}</p></div>`;
+    return;
+  }
+  box.innerHTML = ERR.list.length ? ERR.list.map(errRow).join("")
+    : `<div class="empty"><h3>${ERR.severity || ERR.site || ERR.q ? "Nothing matches" : "No PHP errors 🎉"}</h3>
+        <p>varsha follows every PHP version's <code>logs\\php-*.log</code> live. When a site hits an error it shows up here at once,
+        grouped and with the site, file and line${(S.php_errors || {}).notify === "off" ? "" : ", and you get an alert"}.</p></div>`;
+  if ((S.php_errors || {}).unseen) {
+    await api.post("/api/php-errors/seen").catch(() => {});
+    S.php_errors = { ...S.php_errors, unseen: 0, unseen_errors: 0, unseen_warnings: 0 };
+    renderShell();
+  }
+}
+
+function errToast(g) {
+  const el = document.createElement("div");
+  el.className = `toast${g.severity === "error" ? " bad" : " toast-warn"}`;
+  el.innerHTML = `<div class="toast-title">⚠ PHP ${esc(g.level)}${g.site ? ` · ${esc(g.site)}` : ""}</div>
+    <div class="toast-msg">${esc(g.message.slice(0, 240))}${g.file ? `\n${esc(g.file_name)}:${g.line}` : ""}</div>
+    <div class="row"><button class="btn btn-sm" data-act="goto" data-view="errors">View</button>
+    ${g.file ? `<button class="btn btn-sm btn-blue" data-act="err-open" data-id="${esc(g.id)}">Open in VS Code</button>` : ""}
+    <button class="btn btn-sm btn-ghost" data-act="dismiss">Dismiss</button></div>`;
+  $("#toasts").prepend(el);
+  setTimeout(() => el.remove(), g.severity === "error" ? 15000 : 8000);
+}
+
+function onPhpErrorEvent(data) {
+  if (!S) return;
+  S.php_errors = data.summary;
+  if (view === "errors" && $("#errors")) loadErrors(); else renderShell();
+  if (view === "stack" && $("#bento")) fillHome();
+  for (const g of (data.new || []).slice(0, 3)) errToast(g);
+}
+
+async function errPost(path, body) {
+  try { return await api.post(path, body); } catch (err) { toast({ ok: false, title: "PHP errors", message: err.message }); return null; }
+}
+
 // ---------------------------------------------------------------- tasks view (cron)
 
 const TASK_TEMPLATES = [
@@ -1071,6 +1176,10 @@ function render() {
     return;
   }
   logsTail.stop();
+  if (view === "errors") {
+    if (!$("#errors")) { host.innerHTML = viewErrorsSkeleton(); loadErrors(); }
+    return;
+  }
   if (view === "mail") {
     if (!$("#mail")) { host.innerHTML = viewMailSkeleton(); MAIL.running = mailState().running; renderReader(); loadMail(); }
     else {
@@ -1388,6 +1497,14 @@ document.addEventListener("click", async (event) => {
     case "php-config": phpDialog(id); return;
     case "ini-add": $("#ini-rows").insertAdjacentHTML("beforeend", iniRow("", "", $("#ini-rows").children.length)); return;
     case "quit": quitDialog(); return;
+    case "err-filter": ERR.severity = ref || ""; document.querySelectorAll("#errors .seg-btn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.ref === ERR.severity))); loadErrors(); return;
+    case "err-open": { const r = await errPost(`/api/php-errors/${id}/open`); if (r) toast({ ok: true, title: "PHP error", message: r.message }); return; }
+    case "err-mute": case "err-unmute": if (await errPost(`/api/php-errors/${id}/${action.slice(4)}`)) loadErrors(); return;
+    case "err-dismiss": if (await errPost(`/api/php-errors/${id}/dismiss`)) loadErrors(); return;
+    case "err-clear":
+      confirmDialog("Clear all PHP errors?", "The list is emptied. The log files themselves are kept in logs\\.", "Clear all",
+        async () => { await api.post("/api/php-errors/clear"); loadErrors(); });
+      return;
     case "sites-page": homeSitesPageNo = Math.max(0, homeSitesPageNo + Number(ref)); fillHome(); return;
     case "mail-open": openMail(id); return;
     case "mail-home-open": el.closest(".toast")?.remove(); if (view !== "mail") go("mail"); openMail(id); return;
@@ -1434,6 +1551,11 @@ document.addEventListener("submit", (event) => {
 document.addEventListener("change", (event) => {
   if (event.target.id === "log-follow") logsTail.follow = event.target.checked;
   if (event.target.id === "mail-remote") { MAIL.remote = event.target.checked; renderReader(); }
+  if (event.target.id === "err-site") { ERR.site = event.target.value; loadErrors(); }
+  if (event.target.id === "err-notify") {
+    errPost("/api/php-errors/settings", { notify: event.target.value })
+      .then((r) => r && toast({ ok: true, title: "PHP error alerts", message: { errors: "Fatal errors only", warnings: "Errors and warnings", off: "Off" }[event.target.value] }));
+  }
   if (event.target.dataset.sitePhp) act(`/api/sites/${event.target.dataset.sitePhp}/php`, { php: event.target.value });
   if (event.target.name?.startsWith("ext:")) event.target.closest(".ext")?.classList.toggle("on", event.target.checked);
   if (event.target.id === "home-log-src") {
@@ -1442,9 +1564,22 @@ document.addEventListener("change", (event) => {
   }
 });
 
+let errSearchTimer = null;
+document.addEventListener("input", (event) => {
+  if (event.target.id !== "err-q") return;
+  clearTimeout(errSearchTimer);
+  errSearchTimer = setTimeout(() => { ERR.q = event.target.value.trim(); loadErrors(); }, 250);
+});
+// <details> "toggle" doesn't bubble: listen in the capture phase to remember open stack traces.
+document.addEventListener("toggle", (event) => {
+  const d = event.target;
+  if (!d.classList || !d.classList.contains("err-trace")) return;
+  if (d.open) ERR.open.add(d.dataset.id); else ERR.open.delete(d.dataset.id);
+}, true);
+
 document.addEventListener("keydown", (event) => {
   if (event.target.closest("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
-  const index = "12345678".indexOf(event.key);
+  const index = "123456789".indexOf(event.key);
   if (index >= 0) go(Object.keys(VIEWS)[index]);
   if (event.key === "Escape" && openMenu) { openMenu = null; render(); }
 });
@@ -1456,6 +1591,7 @@ function connect() {
   source.addEventListener("state", scheduleRefresh);
   source.addEventListener("toast", (event) => { toast(JSON.parse(event.data)); scheduleRefresh(); });
   source.addEventListener("mail", (event) => onMailEvent(JSON.parse(event.data)));
+  source.addEventListener("php_error", (event) => onPhpErrorEvent(JSON.parse(event.data)));
   source.onerror = () => { clearTimeout(offlineTimer); offlineTimer = setTimeout(() => { $("#offline").hidden = false; }, 2500); };
 }
 

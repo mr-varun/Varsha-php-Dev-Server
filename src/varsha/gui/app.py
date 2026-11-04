@@ -151,6 +151,17 @@ def main(argv: list[str] | None = None) -> int:
                 last = seq
                 if kind == "toast" and isinstance(data, dict) and not data.get("ok"):
                     main_thread.notify.emit(str(data.get("title", "varsha")), str(data.get("message", "")), True)
+                elif kind == "php_error" and isinstance(data, dict) and data.get("new"):
+                    new = data["new"]
+                    first = new[0]
+                    where = first["site"] or (first["file_name"] or "PHP")
+                    place = f"{first['file_name']}:{first['line']}" if first["file_name"] else ""
+                    if len(new) == 1:
+                        main_thread.notify.emit(f"PHP {first['level']} in {where}",
+                                                f"{first['message'][:160]}\n{place}".strip(), first["severity"] == "error")
+                    else:
+                        main_thread.notify.emit(f"{len(new)} new PHP errors",
+                                                f"Latest in {where}: {first['message'][:120]}", True)
                 elif kind == "mail" and isinstance(data, dict) and data.get("new"):
                     new = data["new"]
                     sender = new[0]["from"]["name"] or new[0]["from"]["address"]
@@ -189,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     manager.start_monitor()
     panel.mail_watch.start()
     panel.scheduler.start()
+    panel.php_errors.start()
     sites.start_watching()
     panel.run_task("Autostart", manager.start_autostart)
     if not args.no_browser:
