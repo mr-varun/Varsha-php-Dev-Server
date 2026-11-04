@@ -12,7 +12,7 @@ User requests beyond the README:
 
 ## Commands
 
-D:\Dev\Projects\Varsha is the **development copy** (source, tests, tools, its own bin/config/data/www for running from source). C:\Varsha is the **deployed app only**: `Varsha.exe` + `_internal\` (PyInstaller one-folder build) + `bin\`, plus the config/data/www/logs/etc folders varsha creates itself. Never put the venv, source or tests in C:\Varsha. **After every change in D:, run the tests and then `tools\deploy.cmd`** (the user's standing request). The bare `python` command on this machine is the Microsoft Store stub; use the venv (create venvs with `py -3.12`).
+D:\Dev\Projects\Varsha is the **development copy** (source, tests, tools, its own bin/config/data/www for running from source). C:\Varsha is the **deployed app only**: `Varsha.exe` + `_internal\` (PyInstaller one-folder build) + `bin\`, plus the config/data/www/logs/etc folders varsha creates itself. Never put the venv, source or tests in C:\Varsha. **Work and test in D: only; run `tools\deploy.cmd` (update C:\Varsha) only when the user says so.** The bare `python` command on this machine is the Microsoft Store stub; use the venv (create venvs with `py -3.12`).
 
 ```powershell
 tools\test.cmd                                    # all tests (.venv\Scripts\python -m pytest -q)
