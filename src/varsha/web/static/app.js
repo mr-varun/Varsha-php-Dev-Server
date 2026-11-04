@@ -658,7 +658,8 @@ function lanCard() {
   const rows = lan.shares.map((s) => `<div class="tunnel">
       <div class="grow"><div class="muted">${esc(s.domain)}</div>
         <a class="tunnel-url" href="${esc(s.url || "#")}" target="_blank" rel="noopener">${esc(s.url || "waiting for a network\u2026")}</a></div>
-      <div class="row">${s.url ? `<button class="btn btn-sm" data-act="copy" data-text="${esc(s.url)}">Copy</button>` : ""}
+      <div class="row">${s.url ? `<button class="btn btn-sm" data-act="copy" data-text="${esc(s.url)}">Copy</button>
+        <button class="btn btn-sm" data-act="lan-qr" data-ref="${esc(s.domain)}" title="Show a QR code to scan with a phone">QR</button>` : ""}
         <button class="btn btn-sm btn-coral" data-act="lan-stop" data-ref="${esc(s.domain)}">Stop</button></div></div>`).join("");
   const firewall = lan.firewall
     ? `<span class="muted">\u2714 Firewall allows ports ${esc(lan.port_range)} on private networks.</span>
@@ -678,6 +679,29 @@ function lanCard() {
       Every LAN share ends when you quit varsha.</p>
     ${rows ? `<div class="lan-list">${rows}</div>` : ""}
     <div class="row lan-firewall">${firewall}</div></div>`;
+}
+
+// A QR code as SVG from its module rows ("0"/"1"), with the 4-module quiet zone scanners need.
+function qrSvg(rows) {
+  const size = rows.length + 8;
+  let d = "";
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] === "1") d += `M${x + 4} ${y + 4}h1v1h-1z`;
+  });
+  return `<svg class="qr-svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges" role="img" aria-label="QR code">
+    <rect width="${size}" height="${size}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+async function lanQrDialog(domain) {
+  let qr;
+  try { qr = await api.get(`/api/lan/${encodeURIComponent(domain)}/qr`); }
+  catch (err) { toast({ ok: false, title: "QR code", message: err.message }); return; }
+  dialog(`<h2>${esc(domain)} on the LAN</h2>
+    <div class="qr-box">${qrSvg(qr.rows)}</div>
+    <p class="qr-url mono">${esc(qr.url)}</p>
+    <p class="muted">Scan it with a phone camera on the same Wi-Fi. The browser warns about the certificate once: Advanced \u2192 Continue.</p>
+    <div class="dialog-actions"><button class="btn" data-act="copy" data-text="${esc(qr.url)}" type="button">Copy link</button>
+      <button class="btn btn-ink" value="cancel">Close</button></div>`, async () => true);
 }
 
 function viewShare() {
@@ -1284,10 +1308,6 @@ async function errPost(path, body) {
 // ---------------------------------------------------------------- tasks view (cron)
 
 const TASK_TEMPLATES = [
-  { key: "laravel", label: "Laravel scheduler", hint: "Runs app/Console/Kernel or routes/console.php schedules",
-    task: { name: "Laravel scheduler", command: "php artisan schedule:run", every: "1m", where: "project" } },
-  { key: "queue", label: "Laravel queue", hint: "Processes waiting jobs, then exits",
-    task: { name: "Laravel queue", command: "php artisan queue:work --stop-when-empty --max-time=240", every: "5m", where: "project" } },
   { key: "script", label: "PHP script", hint: "Any cron.php style script in a site",
     task: { name: "PHP script", command: "php cron.php", every: "hourly", where: "project" } },
   { key: "custom", label: "Custom command", hint: "Any command line (cmd.exe)",
@@ -1305,7 +1325,7 @@ function taskFolder(t) {
 
 function viewTasks() {
   const tasks = S.tasks || [];
-  const head = `<div class="toolbar"><p class="muted">Run commands on a schedule, like cron on Linux: Laravel's scheduler, queue workers, cleanup scripts.
+  const head = `<div class="toolbar"><p class="muted">Run commands on a schedule, like cron on Linux: report scripts, cleanups, imports.
       Each task runs with its site's PHP, composer and mysql on PATH. Tasks run only while varsha runs.</p>
       <button class="btn btn-ink" data-act="task-new" data-ref="custom">+ New task</button></div>`;
   const errors = S.schedule_error ? `<div class="banner banner-coral"><p><b>schedule.json couldn't be read:</b> ${esc(S.schedule_error)}</p></div>` : "";
@@ -1356,7 +1376,7 @@ function taskBody(form) {
 }
 
 function taskDialog(existing, templateKey) {
-  const tpl = TASK_TEMPLATES.find((x) => x.key === templateKey) || TASK_TEMPLATES[3];
+  const tpl = TASK_TEMPLATES.find((x) => x.key === templateKey) || TASK_TEMPLATES.find((x) => x.key === "custom");
   const t = existing || { ...tpl.task, site: S.sites[0]?.domain || "", cwd: "", php: "", at: "02:00", day: 6, timeout: 600, enabled: true };
   const opts = (pairs, current) => pairs.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(current) ? "selected" : ""}>${esc(l)}</option>`).join("");
   const sites = [["", "No site (custom folder)"], ...S.sites.map((s) => [s.domain, s.domain])];
@@ -1365,10 +1385,10 @@ function taskDialog(existing, templateKey) {
   dialog(`<h2>${existing ? "Edit task" : `New task \u00b7 ${esc(tpl.label)}`}</h2>
     <label>Name<input class="input" name="name" value="${esc(t.name)}" maxlength="60" required placeholder="e.g. Banking nightly report"></label>
     <label>Command<input class="input mono" name="command" value="${esc(t.command)}" required spellcheck="false"
-      placeholder="php artisan schedule:run"></label>
+      placeholder="php cron.php"></label>
     <div class="form-row even">
       <label>Site<select class="input" name="site">${opts(sites, t.site)}</select></label>
-      <label>Runs in<select class="input" name="where">${opts([["project", "Project folder (where artisan / composer.json is)"], ["site", "The site's www folder"]], t.where === "custom" ? "project" : t.where)}</select></label>
+      <label>Runs in<select class="input" name="where">${opts([["project", "Project folder (where composer.json is)"], ["site", "The site's www folder"]], t.where === "custom" ? "project" : t.where)}</select></label>
     </div>
     <label>\u2026or a custom folder (used when no site is chosen)<input class="input mono" name="cwd" value="${esc(t.cwd)}" spellcheck="false" placeholder="D:\\scripts"></label>
     <div class="form-row even">
@@ -1761,6 +1781,7 @@ document.addEventListener("click", async (event) => {
       return;
     }
     case "lan-stop": await act(`/api/lan/${encodeURIComponent(ref)}/stop`); return;
+    case "lan-qr": lanQrDialog(ref); return;
     case "lan-firewall-remove":
       confirmDialog("Remove the LAN firewall rule?", "Colleagues can't reach shared sites until you share one again (that asks for the rule again).",
         "Remove", async () => { await api.post("/api/lan/firewall", { enable: false }); });

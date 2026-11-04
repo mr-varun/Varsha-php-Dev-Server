@@ -12,8 +12,8 @@ database is running again.
                          "databases": ["shop"], "since": 1762244000}
       },
       "tasks": {
-        "t3f9a1c": {"name": "Laravel scheduler", "site": "admin.test", "where": "project",
-                    "command": "php artisan schedule:run", "every": "1m", "enabled": true, ...}
+        "t3f9a1c": {"name": "Nightly report", "site": "admin.test", "where": "project",
+                    "command": "php cron.php", "every": "daily", "at": "02:00", "enabled": true, ...}
       }
     }
 

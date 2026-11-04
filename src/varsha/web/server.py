@@ -185,6 +185,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif m := re.fullmatch(r"/api/lan/([a-z0-9.-]+)/qr", parts.path):
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.sites.lan_qr(m.group(1))))
         elif parts.path == "/api/sites/git":
             refresh = (query.get("refresh") or [""])[0] == "1"
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.site_git(refresh)))

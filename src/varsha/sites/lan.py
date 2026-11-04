@@ -144,6 +144,33 @@ def firewall_rule_ok(rule: dict[str, str] | None, program: Path | None) -> bool:
             and Path(rule.get("Program", "")).resolve() == program.resolve())
 
 
+# phpMyAdmin bundles bacon-qr-code (for its two-factor login); varsha borrows it, so the QR comes
+# from a proven encoder and nothing is downloaded. It prints the module matrix, the panel draws it.
+QR_PHP = (
+    "require $argv[1] . '/vendor/autoload.php';"
+    "$qr = BaconQrCode\\Encoder\\Encoder::encode($argv[2], BaconQrCode\\Common\\ErrorCorrectionLevel::M(), 'UTF-8');"
+    "$m = $qr->getMatrix(); $rows = [];"
+    "for ($y = 0; $y < $m->getHeight(); $y++) { $r = '';"
+    " for ($x = 0; $x < $m->getWidth(); $x++) { $r .= $m->get($x, $y) ? '1' : '0'; } $rows[] = $r; }"
+    "echo json_encode($rows);"
+)
+
+
+def qr_rows(php_exe: Path, ini_dir: Path | None, phpmyadmin: Path, text: str) -> list[str]:
+    """The QR code of `text` as rows of "0"/"1" (dark = 1), without the quiet zone."""
+    if not (phpmyadmin / "vendor" / "bacon" / "bacon-qr-code").is_dir():
+        raise ValueError("QR codes need phpMyAdmin in bin\\phpmyadmin (its QR library is used)")
+    ini = ["-c", str(ini_dir)] if ini_dir is not None and (ini_dir / "php.ini").is_file() else ["-n"]
+    result = _run([str(php_exe), *ini, "-r", QR_PHP, "--", str(phpmyadmin), text], timeout=30)
+    if result is None or result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()[:300] if result else "PHP didn't start"
+        raise ValueError(f"Making the QR code failed: {detail}")
+    rows = json.loads(result.stdout)
+    if not (isinstance(rows, list) and rows and all(isinstance(r, str) and set(r) <= {"0", "1"} for r in rows)):
+        raise ValueError("Making the QR code failed: unexpected output")
+    return rows
+
+
 class LanShares:
     """Which sites are shared on the LAN, on which ports. The SiteManager renders and reloads."""
 

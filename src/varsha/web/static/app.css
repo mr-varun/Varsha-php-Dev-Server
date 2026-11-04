@@ -111,6 +111,32 @@ code, .mono { font-family: var(--mono); font-size: .86em; }
 .topbar-spacer { flex: 1; }
 .topbar-actions { display: flex; gap: var(--s2); flex-wrap: wrap; }
 
+/* Compact top bar: on laptop widths (e.g. 1920 px at 125% = 1536 px) everything stays on one row. */
+@media (min-width: 861px) and (max-width: 1700px) {
+  .topbar { gap: var(--s2) var(--s3); padding: 8px 10px; }
+  .brand { gap: 8px; margin-right: 0; }
+  .brand-mark { width: 38px; height: 38px; }
+  .brand-mark img { width: 26px; height: 26px; }
+  .brand-name { font-size: 20px; }
+  .brand-tag { display: none; }
+  .nav { gap: 2px; }
+  .nav-item { padding: 6px 10px; font-size: 14px; }
+  .topbar .meter { min-width: 0; padding: 5px 10px; gap: var(--s2); }
+  .topbar .meter-num { font-size: 17px; }
+  .topbar .meter-bar { min-width: 0; width: 72px; flex: none; }
+  .topbar-actions .btn { min-height: 36px; padding: 6px 11px; }
+  .topbar-actions .btn-label { display: none; }  /* the icons keep their "Start all" / "Stop all" tooltips */
+}
+@media (min-width: 861px) and (max-width: 1320px) {
+  .nav-item { padding: 5px 8px; font-size: 13.5px; }
+  .topbar .meter-num small { display: none; }  /* "4 / 7 running" -> "4"; the bar shows the rest */
+  .brand-name { display: none; }
+}
+@media (min-width: 861px) and (max-width: 1150px) {
+  .nav-item { padding: 5px 7px; font-size: 13px; }
+  .topbar .meter-bar { width: 44px; }
+}
+
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s4); margin-bottom: var(--s5); }
 .eyebrow {
   margin: 0 0 2px; font-size: 12px; font-weight: 700;
@@ -351,6 +377,9 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .tunnel + .tunnel { margin-top: var(--s3); }
 .tunnel-url { font: 700 16px var(--mono); overflow-wrap: anywhere; }
 .lan-list { margin-top: var(--s4); }
+.qr-box { display: grid; place-items: center; padding: var(--s3); background: #fff; border: var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.qr-svg { width: min(280px, 70vw); height: auto; display: block; }
+.qr-url { margin: var(--s3) 0 0; text-align: center; font-weight: 700; overflow-wrap: anywhere; }
 .lan-firewall { margin-top: var(--s4); align-items: center; gap: var(--s3); }
 
 /* ------------------------------------------------------------------ logs */

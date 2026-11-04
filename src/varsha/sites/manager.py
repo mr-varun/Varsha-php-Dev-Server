@@ -24,6 +24,7 @@ from varsha.helper import elevate
 from varsha.services import ports as port_check
 from varsha.services.manager import ServiceManager
 from varsha.services.models import ServiceState
+from varsha.services.resolve import version_key
 from varsha.sites import hosts, lan
 from varsha.sites.discovery import Site
 
@@ -60,6 +61,7 @@ class SiteManager:
         self._lock = threading.Lock()
         self.last_error = ""
         self.lan = lan.LanShares(self.paths)
+        self._qr_cache: dict[str, list[str]] = {}
 
     def set_listener(self, listener: Listener | None) -> None:
         self._listener = listener
@@ -168,6 +170,23 @@ class SiteManager:
             return self.services.status(self.apache_id).state is ServiceState.RUNNING
         except ServiceError:  # no Apache in services.json
             return False
+
+    def lan_qr(self, domain: str) -> dict[str, object]:
+        """The QR code of a shared site's LAN address, for a colleague's phone camera."""
+        share = next((s for s in self.lan.status(self.apache_exe())["shares"] if s["domain"] == domain), None)
+        if share is None or not share["url"]:
+            raise ValueError(f"{domain} isn't shared on the LAN")
+        url = str(share["url"])
+        rows = self._qr_cache.get(url)
+        if rows is None:
+            builds = [b for b in self.engine.php_builds() if version_key(b.version) >= (7, 2)]
+            default = self.engine.default_php()
+            build = default if default in builds else max(builds, key=lambda b: version_key(b.version), default=None)
+            if build is None:
+                raise ValueError("QR codes need PHP 7.2 or newer in bin\\php")
+            rows = lan.qr_rows(build.php_exe, self.engine.php_ini_dir(build), self.paths.bin / "phpmyadmin", url)
+            self._qr_cache[url] = rows
+        return {"url": url, "rows": rows}
 
     def lan_firewall(self, enable: bool) -> str:
         program = self.apache_exe()

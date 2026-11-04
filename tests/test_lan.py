@@ -135,3 +135,19 @@ def test_lan_addresses_are_private_ipv4() -> None:
         assert lan._usable(address.ip)
     assert lan._usable("192.168.1.5") and lan._usable("10.1.2.3") and lan._usable("172.20.0.4")
     assert not lan._usable("127.0.0.1") and not lan._usable("169.254.3.4") and not lan._usable("8.8.8.8")
+
+
+REPO = Path(__file__).resolve().parents[1]
+PHP = next(iter(sorted((REPO / "bin" / "php").glob("php-8.*/php.exe"))), None) if (REPO / "bin" / "php").is_dir() else None
+
+
+@pytest.mark.skipif(PHP is None or not (REPO / "bin/phpmyadmin/vendor/bacon").is_dir(), reason="needs PHP 8 and phpMyAdmin in bin")
+def test_qr_code_comes_from_phpmyadmins_library() -> None:
+    rows = lan.qr_rows(PHP, None, REPO / "bin" / "phpmyadmin", "https://192.168.1.5:8443/")
+    assert len(rows) == 29 and all(len(r) == 29 for r in rows)  # version 3 at level M
+    finder = ["1111111", "1000001", "1011101", "1011101", "1011101", "1000001", "1111111"]
+    assert [r[:7] for r in rows[:7]] == finder and [r[-7:] for r in rows[:7]] == finder
+    assert [r[:7] for r in rows[-7:]] == finder  # three finder patterns, none bottom-right
+    assert rows[6][8:21] == "1010101010101"  # timing pattern
+    with pytest.raises(ValueError, match="phpMyAdmin"):
+        lan.qr_rows(PHP, None, REPO / "nowhere", "x")
