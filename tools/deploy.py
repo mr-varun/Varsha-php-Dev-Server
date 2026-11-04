@@ -1,18 +1,17 @@
-"""Build the frozen Varsha.exe on D: and put only the final app files into C:\\Varsha.
+"""Build the installer (Varsha-Setup\\) on D: and install the final app into C:\\Varsha with it.
 
-    tools\\deploy.cmd [--target C:\\Varsha] [--skip-build] [--skip-bin]
+    tools\\deploy.cmd [--target C:\\Varsha] [--skip-build] [--no-install]
 
 What it does:
   1. builds Varsha.exe + _internal\\ with PyInstaller (tools\\varsha.spec) into build\\dist\\Varsha
      (code, web panel, templates and default config are all inside the build)
-  2. replaces <target>\\Varsha.exe and <target>\\_internal (swapped in at the end)
-  3. syncs bin\\ (Apache, PHP, MySQL, ...) to <target>\\bin: new and changed files only,
-     never deletes, skips phpMyAdmin's generated config files
-  4. checks that the new exe starts and finds its root folder
+  2. refreshes Varsha-Setup\\payload: the build, plus bin\\ as hard links to this repo's bin\\
+     (no second 1.3 GB copy on D:; phpMyAdmin's generated config files are left out)
+  3. builds Varsha-Setup\\Setup.exe (tools\\installer, C# compiler that ships with Windows)
+  4. runs  Setup.exe /quiet /noshortcuts  to install into the target, then checks the new exe
 
-Nothing else goes to the target: no venv, no source, no tests. varsha creates config\\, data\\,
-www\\, logs\\ and etc\\ there by itself on first start, and deploy never touches them.
-It refuses to run while anything runs from the target (varsha or one of its services).
+Varsha-Setup\\ is self-contained: after formatting the PC, run Varsha-Setup\\Setup.exe and it sets
+up C:\\Varsha again with nothing else installed. Setup never touches config\\, data\\ or www\\.
 """
 
 from __future__ import annotations
@@ -23,14 +22,35 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = Path(r"C:\Varsha")
 DIST = REPO / "build" / "dist" / "Varsha"
-# Written by varsha's config engine at runtime; each folder keeps its own.
+SETUP = REPO / "Varsha-Setup"
+PAYLOAD = SETUP / "payload"
+# Written by varsha's config engine at runtime; each install keeps its own.
 BIN_SKIP = {("phpmyadmin", "config.inc.php"), ("phpmyadmin", "config.footer.inc.php")}
+
+README = """varsha setup
+============
+
+Run Setup.exe. It installs varsha into C:\\Varsha (you can pick another folder) and creates
+Desktop and Start menu shortcuts. Nothing else needs to be installed on the PC: Python, the
+control panel and the Visual C++ runtimes are all inside payload\\.
+
+Running it again updates the app and bin\\. It never touches config\\, data\\ (databases) or
+www\\ (sites) in the install folder.
+
+After a fresh install, in the control panel:
+  - Trust HTTPS      (installs the local certificate authority for https://*.test)
+  - Update hosts / DNS route   (one administrator prompt) so *.test names resolve
+  - restore your database backups
+
+Built {built} from {source}
+"""
 
 
 def say(message: str) -> None:
@@ -41,21 +61,6 @@ def say(message: str) -> None:
 def fail(message: str) -> None:
     say(f"deploy: {message}")
     raise SystemExit(1)
-
-
-def running_from(target: Path) -> list[str]:
-    """Processes whose exe lives in the target folder (varsha itself, httpd, mysqld, ...)."""
-    import psutil
-
-    found = []
-    for proc in psutil.process_iter(["exe", "name"]):
-        exe = proc.info.get("exe")
-        try:
-            if exe and Path(exe).resolve().is_relative_to(target):
-                found.append(f"{proc.info.get('name')} (PID {proc.pid})")
-        except (OSError, ValueError):
-            continue
-    return found
 
 
 def build() -> None:
@@ -70,42 +75,53 @@ def build() -> None:
     say(f"  build      {DIST}")
 
 
-def install_app(target: Path) -> None:
+def make_payload() -> None:
     if not (DIST / "Varsha.exe").is_file():
         fail(f"{DIST / 'Varsha.exe'} not found: build first (drop --skip-build)")
-    target.mkdir(parents=True, exist_ok=True)
-    new, current, old = target / "_internal.new", target / "_internal", target / "_internal.old"
-    for leftover in (new, old):
-        shutil.rmtree(leftover, ignore_errors=True)
-    shutil.copytree(DIST / "_internal", new)
-    if current.exists():
-        current.rename(old)
-    new.rename(current)
-    shutil.rmtree(old, ignore_errors=True)
-    shutil.copy2(DIST / "Varsha.exe", target / "Varsha.exe")
-    files = sum(1 for p in current.rglob("*") if p.is_file())
-    say(f"  app        Varsha.exe + _internal ({files} files) -> {target}")
-
-
-def sync_bin(target: Path) -> None:
-    source, dest = REPO / "bin", target / "bin"
-    copied = same = 0
+    PAYLOAD.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(PAYLOAD / "_internal", ignore_errors=True)
+    shutil.copytree(DIST / "_internal", PAYLOAD / "_internal")
+    shutil.copy2(DIST / "Varsha.exe", PAYLOAD / "Varsha.exe")
+    # bin: hard links (same drive), so the payload costs no space and is always current.
+    # Removing the old links never touches the real files in REPO\bin.
+    shutil.rmtree(PAYLOAD / "bin", ignore_errors=True)
+    source = REPO / "bin"
+    linked = copied = 0
     for path in source.rglob("*"):
         rel = path.relative_to(source)
         if not path.is_file() or (len(rel.parts) == 2 and (rel.parts[0], rel.name) in BIN_SKIP):
             continue
-        out = dest / rel
-        st = path.stat()
-        if out.is_file():
-            ot = out.stat()
-            if ot.st_size == st.st_size and int(ot.st_mtime) == int(st.st_mtime):
-                same += 1
-                continue
+        out = PAYLOAD / "bin" / rel
         out.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, out)
-        copied += 1
-    extra = [p.name for p in dest.iterdir() if not (source / p.name).exists()] if dest.is_dir() else []
-    say(f"  bin        {copied} copied, {same} unchanged" + (f"; only in target: {', '.join(extra)}" if extra else ""))
+        try:
+            os.link(path, out)
+            linked += 1
+        except OSError:
+            shutil.copy2(path, out)
+            copied += 1
+    (SETUP / "README.txt").write_text(
+        README.format(built=time.strftime("%Y-%m-%d %H:%M"), source=REPO), encoding="utf-8")
+    say(f"  payload    {PAYLOAD} (bin: {linked} hard links" + (f", {copied} copies" if copied else "") + ")")
+
+
+def build_setup() -> None:
+    result = subprocess.run(["cmd.exe", "/c", str(REPO / "tools" / "installer" / "build.cmd"), str(SETUP)],
+                            capture_output=True, text=True)
+    if result.returncode != 0 or not (SETUP / "Setup.exe").is_file():
+        fail(f"building Setup.exe failed:\n{result.stdout}{result.stderr}")
+    say(f"  setup      {SETUP / 'Setup.exe'}")
+
+
+def install(target: Path) -> None:
+    log = Path(tempfile.gettempdir()) / "varsha-setup.log"
+    log.unlink(missing_ok=True)
+    code = subprocess.run([str(SETUP / "Setup.exe"), "/quiet", "/noshortcuts", "/target", str(target),
+                           "/log", str(log)]).returncode
+    text = log.read_text(encoding="utf-8-sig") if log.is_file() else "(no log)"
+    for line in text.strip().splitlines():
+        say(f"  install    {line}")
+    if code != 0:
+        fail(f"Setup.exe failed (exit {code})")
 
 
 def verify(target: Path) -> None:
@@ -123,25 +139,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--target", type=Path, default=DEFAULT_TARGET)
     parser.add_argument("--skip-build", action="store_true", help="reuse build\\dist\\Varsha")
-    parser.add_argument("--skip-bin", action="store_true", help="don't sync bin\\")
+    parser.add_argument("--no-install", action="store_true", help="only refresh Varsha-Setup")
     args = parser.parse_args()
     target: Path = args.target.resolve()
     if target == REPO or target.is_relative_to(REPO):
         fail("the target must be outside the source folder")
-    busy = running_from(target)
-    if busy:
-        fail(f"these run from {target}: {', '.join(busy)}. Quit varsha (tray > Quit, stop services), then deploy again.")
 
     say(f"deploying {REPO} -> {target}")
     if not args.skip_build:
         build()
-    install_app(target)
-    if not args.skip_bin:
-        sync_bin(target)
-    info = {"source": str(REPO), "deployed": time.strftime("%Y-%m-%d %H:%M:%S")}
-    (target / "_internal" / "DEPLOYED.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
-    verify(target)
-    say(f"done at {info['deployed']}. Start {target / 'Varsha.exe'}")
+    make_payload()
+    info = {"source": str(REPO), "built": time.strftime("%Y-%m-%d %H:%M:%S")}
+    (PAYLOAD / "_internal" / "DEPLOYED.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    build_setup()
+    if not args.no_install:
+        install(target)
+        verify(target)
+    say(f"done. Installer: {SETUP / 'Setup.exe'}" + ("" if args.no_install else f"  App: {target / 'Varsha.exe'}"))
     return 0
 
 
