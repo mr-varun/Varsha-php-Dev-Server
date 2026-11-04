@@ -38,6 +38,7 @@ from varsha.services.remote import RemoteDbStore, test_connection, validate
 from varsha.services.resolve import expand
 from varsha.settings import Settings
 from varsha.sites import hosts
+from varsha.sites.git import SiteGit
 from varsha.sites.manager import SiteManager
 from varsha.tunnel.manager import TunnelManager
 
@@ -107,6 +108,7 @@ class PanelApp:
                                    prepare_task=self._prepare_task, logs_dir=paths.logs, background=True)
         self.doctor = Doctor(paths, manager, engine, sites, self.scheduler, self.databases,
                              dns_route=self.dns_route_active)
+        self.git = SiteGit()
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -187,6 +189,11 @@ class PanelApp:
             return [(s.domain, s.folder) for s in self.sites.sites()]
         except Exception:  # a broken sites.json must not stop the error watcher
             return []
+
+    def site_git(self, refresh: bool = False) -> dict[str, Any]:
+        if not self.git.available:
+            return {"available": False, "sites": {}}
+        return {"available": True, "sites": self.git.statuses(self._site_roots(), refresh=refresh)}
 
     def open_php_error(self, group_id: str) -> str:
         """Open the file of an error at its line: VS Code if installed, else Explorer on the file."""

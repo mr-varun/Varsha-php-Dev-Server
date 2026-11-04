@@ -339,6 +339,7 @@ function viewSites() {
     <button class="btn" data-act="open" data-what="www">${FOLDER} Open www folder</button>
     <button class="btn" data-act="terminal">Terminal</button>
     <button class="btn" data-act="sync-sites">\u21bb Rescan sites</button>
+    <button class="btn" data-act="git-refresh" title="Read every site's git status again (read-only, nothing is fetched)">\u2387 Git status</button>
     <span class="muted">Every folder in <code>www\\</code> becomes <b>folder.${esc(S.tld)}</b>; a <code>public\\</code> subfolder is used as the web root.</span></div>`);
   if (!S.sites.length) {
     parts.push(`<div class="empty"><h3>No sites yet</h3>
@@ -355,6 +356,7 @@ function viewSites() {
             ? `<br><span class="muted">root</span> ${esc(site.docroot)}` : ""}</div>
           <label class="php-pick"><span>PHP</span>${phpSelect(site)}</label>
         </div>
+        <div class="ticket-git" data-git="${esc(site.domain)}">${gitLine(GIT.sites[site.domain])}</div>
         <div class="ticket-actions">
           <a class="btn btn-sm btn-blue" href="${esc(site.url)}" target="_blank" rel="noopener">Open \u2197</a>
           ${site.https ? `<a class="btn btn-sm" href="${esc(site.url.replace("https://", "http://"))}" target="_blank" rel="noopener">http</a>` : ""}
@@ -943,6 +945,53 @@ function onMailEvent(data) {
   for (const m of (data.new || []).slice(0, 3)) mailToast(m);
 }
 
+// ---------------------------------------------------------------- git status on site cards
+// Read-only: the server runs git status/log without locks and never fetches. Cached here and on
+// the server for 30 s; the Sites view re-renders often, so the cards are filled from GIT.
+
+const GIT = { sites: {}, at: 0, loading: false, available: true };
+const GIT_CODES = { M: "modified", A: "added", D: "deleted", R: "renamed", C: "copied", U: "conflict", "?": "new" };
+
+function gitLine(g) {
+  if (!GIT.available) return `<span class="muted git-none">Git isn't installed</span>`;
+  if (!g) return `<span class="muted git-none">checking git…</span>`;
+  if (!g.repo) return `<span class="muted git-none">${g.error ? esc(g.error) : "not a git repository"}</span>`;
+  const dirty = (g.changed || 0) + (g.untracked || 0) + (g.conflicts || 0);
+  const files = (g.files || []).map((f) => {
+    const code = f.code === "??" ? "?" : (f.code.replace(".", "")[0] || "M");
+    return `${GIT_CODES[code] || code}: ${f.path}`;
+  }).join("\n") + (dirty > (g.files || []).length ? `\n… and ${dirty - g.files.length} more` : "");
+  const chips = [
+    `<span class="chip chip-mono git-branch" title="${esc(g.root)}">⎇ ${esc(g.detached ? "detached HEAD" : g.branch || "?")}</span>`,
+    g.shared ? `<span class="chip git-shared" title="Shared repository: ${esc(g.root)}">${esc(g.repo_name)}</span>` : "",
+    dirty ? `<span class="chip chip-yellow" title="${esc(files)}">${g.conflicts ? `${g.conflicts} conflict${g.conflicts > 1 ? "s" : ""} · ` : ""}${dirty} changed</span>`
+      : `<span class="chip chip-mint">clean</span>`,
+    g.ahead ? `<span class="chip chip-blue" title="Commits not pushed to ${esc(g.upstream)}">↑${g.ahead} to push</span>` : "",
+    g.behind ? `<span class="chip chip-coral" title="Commits on ${esc(g.upstream)} you don't have (as of the last fetch)">↓${g.behind} to pull</span>` : "",
+    g.upstream ? "" : `<span class="chip" title="This branch has no upstream">local only</span>`,
+  ].join("");
+  const last = g.last ? `<div class="git-last" title="${esc(g.last.subject)}\n${esc(g.last.author)} · ${esc(fmtDate(g.last.when))}"><span class="mono">${esc(g.last.hash)}</span>
+      <span class="muted">${esc(mailTime(new Date(g.last.when * 1000).toISOString()))} ·</span> ${esc(g.last.subject)}</div>` : "";
+  return `<div class="row git-chips">${chips}</div>${last}`;
+}
+
+function fillSiteGit() {
+  document.querySelectorAll("[data-git]").forEach((el) => { el.innerHTML = gitLine(GIT.sites[el.dataset.git]); });
+}
+
+async function loadSiteGit(force = false) {
+  if (GIT.loading || (!force && Date.now() - GIT.at < 30000)) { fillSiteGit(); return; }
+  GIT.loading = true;
+  try {
+    const r = await api.get(`/api/sites/git${force ? "?refresh=1" : ""}`);
+    GIT.available = r.available;
+    GIT.sites = r.sites;
+    GIT.at = Date.now();
+  } catch { /* the cards keep showing what they had */ }
+  GIT.loading = false;
+  fillSiteGit();
+}
+
 // ---------------------------------------------------------------- doctor view
 // Built once; a run replaces the results. Fixes map onto existing actions where one exists.
 
@@ -1275,6 +1324,7 @@ function render() {
   const shareValue = $("#share-target")?.value;
   const focused = document.activeElement?.id;
   host.innerHTML = RENDER[view]();
+  if (view === "sites") loadSiteGit();
   if (shareValue !== undefined && $("#share-target")) $("#share-target").value = shareValue;
   if (focused && document.getElementById(focused)) document.getElementById(focused).focus();
 }
@@ -1581,6 +1631,7 @@ document.addEventListener("click", async (event) => {
     case "php-config": phpDialog(id); return;
     case "ini-add": $("#ini-rows").insertAdjacentHTML("beforeend", iniRow("", "", $("#ini-rows").children.length)); return;
     case "quit": quitDialog(); return;
+    case "git-refresh": GIT.sites = {}; fillSiteGit(); loadSiteGit(true); return;
     case "doc-run": runDoctor(); return;
     case "doc-fix": doctorAction("/api/doctor/fix", { fix: ref }); return;
     case "doc-hosts": doctorAction("/api/hosts/update"); return;

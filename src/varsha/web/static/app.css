@@ -829,3 +829,15 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .doc-title { font-weight: 700; }
 .doc-detail { margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (prefers-color-scheme: dark) { .doc-warn { background: #3d3415; } }
+
+/* ------------------------------------------------------------------ git status on site cards */
+
+.ticket-git { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; background: var(--paper);
+  border: 2px dashed var(--grey); border-radius: var(--radius-sm); min-height: 34px; justify-content: center; }
+.git-chips { gap: 5px; }
+.git-chips .chip { font-size: 11.5px; padding: 1px 7px; }
+.git-branch { background: var(--inverse); color: var(--inverse-text); }
+.git-shared { background: var(--lilac); color: #121212; }
+.git-last { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-last .mono { font-weight: 700; }
+.git-none { font-size: 12.5px; }
