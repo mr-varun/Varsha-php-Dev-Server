@@ -1,21 +1,40 @@
-MIT License
-
+varsha - a portable local PHP web development server for Windows
 Copyright (c) 2026 Varun Hosakoti
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International License (CC BY-NC-SA 4.0). The full legal text, which is what counts:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+-------------------------------------------------------------------------------------------
+In plain words (a summary only; the legal text above is the license):
+
+  You may   - use varsha for yourself, copy it and give it to others;
+            - change it, improve it and share your changed version.
+
+  You must  - give credit: keep this notice, name "varsha by Varun Hosakoti" and link to the
+              original project (https://github.com/mr-varun/Varsha-php-Dev-Server);
+            - share changed versions under this same license (CC BY-NC-SA 4.0), so they stay
+              free for everyone too.
+
+  You may not - sell varsha or a changed version of it, or charge money for getting or using it
+                (NonCommercial).
+
+-------------------------------------------------------------------------------------------
+Additional permissions from the copyright holder (on top of CC BY-NC-SA 4.0):
+
+  1. Donations. You may accept voluntary donations for your work on varsha or on a changed
+     version, as long as varsha and your version stay free to get and to use: no payment
+     required, and no features held back for those who pay.
+
+  2. Using varsha as a tool. You may use varsha to build, test and run your own websites and
+     software, including paid work for clients. Only selling or charging for varsha itself
+     (or a changed version of it) is not allowed.
+
+-------------------------------------------------------------------------------------------
+No warranty: varsha is provided "as is", without warranty of any kind, as stated in Section 5
+of the license.
+
+Third-party software that varsha runs (Apache, PHP, MySQL, MariaDB, phpMyAdmin, Mailpit,
+mkcert, cloudflared, Composer, HeidiSQL and their components in bin\) is not part of this
+project and keeps its own license.
