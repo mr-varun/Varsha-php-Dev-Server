@@ -775,6 +775,7 @@ function viewMailSkeleton() {
             <button class="btn btn-sm" data-act="mail-refresh" title="Reload the list" aria-label="Reload">↻</button>
             <button class="btn btn-sm" data-act="mail-read-all">Mark all read</button>
             <button class="btn btn-sm btn-coral" data-act="mail-delete-all">Delete all</button>
+            ${S.mail.ui ? `<a class="btn btn-sm" href="${esc(S.mail.ui)}" target="_blank" rel="noopener" title="Mailpit's own page">Mailpit ↗</a>` : ""}
           </div>
           <div class="mail-list" id="mail-list"></div>
         </section>
@@ -826,7 +827,7 @@ async function loadMail(append = false) {
 }
 
 async function openMail(id) {
-  Object.assign(MAIL, { selected: id, headers: null, remote: false });
+  Object.assign(MAIL, { selected: id, headers: null, remote: false, compat: null, links: null });
   renderMailList();
   const box = $("#mail-reader");
   if (box) box.innerHTML = `<div class="mail-empty"><p>Loading…</p></div>`;
@@ -854,12 +855,17 @@ function renderReader() {
     return;
   }
   const people = (label, list) => (list.length ? `<dt>${label}</dt><dd>${list.map((a) => esc(whoFull(a))).join(", ")}</dd>` : "");
-  const tabs = [["html", "HTML", d.has_html], ["text", "Text", true], ["headers", "Headers", true]]
+  const tabs = [["html", "HTML", d.has_html], ["text", "Text", true], ["headers", "Headers", true],
+    ["compat", "Compatibility", d.has_html], ["links", "Links", true]]
     .map(([key, label, ok]) => `<button class="mail-tab" data-act="mail-tab" data-tab="${key}" aria-pressed="${MAIL.tab === key}" ${ok ? "" : "disabled"}>${label}</button>`).join("");
   let body;
   if (MAIL.tab === "html" && d.has_html) {
     body = `<iframe class="mail-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox"
       referrerpolicy="no-referrer" src="${mailUrl(d.id, "/html")}${MAIL.remote ? "?remote=1" : ""}"></iframe>`;
+  } else if (MAIL.tab === "compat" && d.has_html) {
+    body = compatHtml(MAIL.compat);
+  } else if (MAIL.tab === "links") {
+    body = linksHtml(MAIL.links);
   } else if (MAIL.tab === "headers") {
     body = MAIL.headers ? `<dl class="kv mail-headers">${Object.entries(MAIL.headers)
       .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v.map(esc).join("<br>")}</dd>`).join("")}</dl>` : `<p class="muted">Loading…</p>`;
@@ -871,6 +877,7 @@ function renderReader() {
       <div class="row">
         <button class="btn btn-sm" data-act="mail-unread" data-id="${esc(d.id)}">Mark unread</button>
         <a class="btn btn-sm" href="${mailUrl(d.id, "/raw")}" download>Download .eml</a>
+        ${S.mail.ui ? `<a class="btn btn-sm" href="${esc(S.mail.ui)}/view/${encodeURIComponent(d.id)}" target="_blank" rel="noopener" title="Open this email in Mailpit's own page">Mailpit ↗</a>` : ""}
         <button class="btn btn-sm btn-coral" data-act="mail-delete" data-id="${esc(d.id)}">Delete</button>
       </div>
     </div>
@@ -882,6 +889,60 @@ function renderReader() {
       ${MAIL.tab === "html" && d.has_html ? `<label class="toggle"><input type="checkbox" id="mail-remote" ${MAIL.remote ? "checked" : ""}> load remote images</label>` : ""}</div>
     <div class="mail-body">${body}</div>`;
   if (MAIL.tab === "headers" && !MAIL.headers) loadHeaders(d.id);
+  if (MAIL.tab === "compat" && d.has_html && !MAIL.compat) loadCompat(d.id);
+  box.querySelectorAll("[data-w]").forEach((el) => { el.style.width = `${el.dataset.w}%`; });  // CSP: no style attributes
+}
+
+function compatHtml(c) {
+  if (!c) return `<p class="muted">Checking the HTML against ~30 email apps…</p>`;
+  if (c.error) return `<div class="mail-empty"><b>Couldn't check</b><p>${esc(c.error)}</p></div>`;
+  const items = c.warnings.map((w) => `<div class="compat-item ${w.unsupported >= 50 ? "bad" : w.unsupported > 0 ? "warn" : "part"}">
+      <div class="row"><b>${esc(w.title)}</b><span class="chip">${esc(w.category)}</span><span class="grow"></span>
+        ${w.unsupported ? `<span class="chip chip-coral">${w.unsupported}% not supported</span>` : ""}
+        ${w.partial ? `<span class="chip chip-yellow">${w.partial}% partly</span>` : ""}</div>
+      ${w.description ? `<p class="muted">${esc(w.description)}</p>` : ""}
+      ${w.not_in.length ? `<p><b>Not shown in:</b> ${esc(w.not_in.join(", "))}</p>` : ""}
+      ${w.partly_in.length ? `<p><b>Partly in:</b> ${esc(w.partly_in.join(", "))}</p>` : ""}
+      ${w.notes.map((n) => `<p class="compat-note">${esc(n)}</p>`).join("")}
+      ${w.url ? `<a class="compat-link" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer">Details on caniemail.com ↗</a>` : ""}
+    </div>`).join("");
+  return `<div class="compat-sum">
+      <div class="compat-bar" aria-hidden="true"><i class="cb-ok" data-w="${c.supported}"></i><i class="cb-part" data-w="${c.partial}"></i><i class="cb-no" data-w="${c.unsupported}"></i></div>
+      <p><b>${c.supported}% supported</b> · ${c.partial}% partly · ${c.unsupported}% not supported
+        <span class="muted">— ${c.tests} checks across ${c.apps} email apps (caniemail.com data, checked on this PC)</span></p>
+    </div>
+    ${items || `<div class="mail-empty"><b>No problems found</b><p>Everything this email uses works in every checked email app.</p></div>`}`;
+}
+
+async function loadCompat(id) {
+  try { MAIL.compat = await api.get(mailUrl(id, "/html-check")); } catch (err) { MAIL.compat = { error: err.message }; }
+  if (MAIL.selected === id && MAIL.tab === "compat") renderReader();
+}
+
+function linksHtml(l) {
+  if (l === "running") return `<p class="muted">Visiting every link… (up to a minute for slow sites)</p>`;
+  if (!l) {
+    return `<div class="links-intro"><p>Visits every link and image in this email and reports broken ones.
+        <b>This goes out to the internet</b> (from this PC), so it only runs when you click.</p>
+      <div class="row"><button class="btn btn-blue" data-act="mail-links">Check links</button>
+        <label class="toggle"><input type="checkbox" id="mail-follow" ${MAIL.follow ? "checked" : ""}> follow redirects</label></div></div>`;
+  }
+  if (l.error) return `<div class="mail-empty"><b>Couldn't check</b><p>${esc(l.error)}</p></div>`;
+  const cls = (c) => (c >= 200 && c < 300 ? "chip-mint" : c >= 300 && c < 400 ? "chip-yellow" : "chip-coral");
+  return `<p><b>${plural(l.links.length, "link")}</b>${l.errors ? ` · <span class="ab-bad">${l.errors} broken</span>` : " · all fine"}
+      <button class="btn btn-sm" data-act="mail-links">Check again</button></p>
+    ${l.links.length ? `<table class="links-table"><tbody>${l.links.map((x) => `<tr>
+        <td><span class="chip ${cls(x.code)}">${x.code || "—"}</span></td>
+        <td class="mono links-url"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></td>
+        <td class="muted">${esc(x.status)}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">This email has no links or images.</p>`}`;
+}
+
+async function checkLinks() {
+  const id = MAIL.selected;
+  MAIL.links = "running";
+  renderReader();
+  try { MAIL.links = await api.get(mailUrl(id, `/link-check${MAIL.follow ? "?follow=1" : ""}`)); } catch (err) { MAIL.links = { error: err.message }; }
+  if (MAIL.selected === id) renderReader();
 }
 
 async function loadHeaders(id) {
@@ -1649,6 +1710,7 @@ document.addEventListener("click", async (event) => {
     case "mail-home-open": el.closest(".toast")?.remove(); if (view !== "mail") go("mail"); openMail(id); return;
     case "mail-refresh": loadMail(); return;
     case "mail-more": loadMail(true); return;
+    case "mail-links": checkLinks(); return;
     case "mail-tab": MAIL.tab = el.dataset.tab; renderReader(); return;
     case "mail-unread":
       if (await mailPost("/api/mail/read", { ids: [id], read: false })) {
@@ -1690,6 +1752,7 @@ document.addEventListener("submit", (event) => {
 document.addEventListener("change", (event) => {
   if (event.target.id === "log-follow") logsTail.follow = event.target.checked;
   if (event.target.id === "mail-remote") { MAIL.remote = event.target.checked; renderReader(); }
+  if (event.target.id === "mail-follow") MAIL.follow = event.target.checked;
   if (event.target.id === "err-site") { ERR.site = event.target.value; loadErrors(); }
   if (event.target.id === "err-notify") {
     errPost("/api/php-errors/settings", { notify: event.target.value })

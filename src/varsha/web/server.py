@@ -215,6 +215,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/headers", path):
             self._json(HTTPStatus.OK, mail.headers(m.group(1)))
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/html-check", path):
+            self._json(HTTPStatus.OK, mail.html_check(m.group(1)))
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/link-check", path):
+            self._json(HTTPStatus.OK, mail.link_check(m.group(1), follow=arg("follow") == "1"))
         elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/raw", path):
             body = mail.raw(m.group(1))
             self._download(body, "message/rfc822", f"{m.group(1)}.eml")

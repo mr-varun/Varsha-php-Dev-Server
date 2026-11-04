@@ -841,3 +841,28 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .git-last { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-last .mono { font-weight: 700; }
 .git-none { font-size: 12.5px; }
+
+/* ------------------------------------------------------------------ mail: compatibility and links */
+
+.compat-sum { margin-bottom: var(--s3); }
+.compat-sum p { margin: 6px 0 0; font-size: 13.5px; }
+.compat-bar { display: flex; height: 16px; border: var(--line-thin); border-radius: 999px; overflow: hidden; background: var(--paper); }
+.compat-bar i { display: block; height: 100%; }
+.compat-bar .cb-ok { background: var(--mint); }
+.compat-bar .cb-part { background: var(--yellow); }
+.compat-bar .cb-no { background: var(--coral); }
+.compat-item { padding: var(--s3) var(--s4); margin-bottom: 8px; border: var(--line-thin); border-radius: var(--radius-sm); background: var(--card); }
+.compat-item.bad { background: var(--coral-soft); }
+.compat-item.warn { background: #fff7d6; }
+.compat-item p { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.compat-note { font-style: italic; color: var(--muted); }
+.compat-link { display: inline-block; margin-top: 6px; font-weight: 700; font-size: 12.5px; }
+.links-intro p { margin: 0 0 var(--s3); }
+.links-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.links-table td { padding: 6px 8px; border-bottom: 1px dashed var(--grey); vertical-align: top; }
+.links-table td:first-child { width: 60px; }
+.links-url { overflow-wrap: anywhere; }
+.mail-tabs { flex-wrap: wrap; }
+@media (prefers-color-scheme: dark) { .compat-item.warn { background: #3d3415; } }
+/* the inbox count gets its own line above the buttons, so it never squeezes into a narrow column */
+#mail-count { flex: 1 1 100%; }

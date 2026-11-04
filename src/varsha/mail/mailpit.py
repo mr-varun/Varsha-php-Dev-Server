@@ -52,6 +52,18 @@ def check_part(part_id: str) -> str:
     return part_id
 
 
+def _plain(text: Any, markup: bool = False) -> str:
+    """Plain text for the panel (which escapes it). caniemail.com *notes* carry a little formatting
+    HTML (<code>, <a>, ...) that is dropped; titles such as "<script> element" are literal text
+    and are only unescaped."""
+    import html as html_lib
+
+    value = str(text or "")
+    if markup:
+        value = re.sub(r"</?(?:code|em|strong|b|i|a|br|p|span|kbd|samp|pre)\b[^>]*>", "", value, flags=re.IGNORECASE)
+    return html_lib.unescape(value).strip()
+
+
 def _addr(entry: Any) -> dict[str, str]:
     entry = entry or {}
     return {"name": str(entry.get("Name") or ""), "address": str(entry.get("Address") or "")}
@@ -183,6 +195,43 @@ class MailpitClient:
         if re.search(r"<head[^>]*>", html, flags=re.IGNORECASE):
             return re.sub(r"(<head[^>]*>)", r"\1" + base, html, count=1, flags=re.IGNORECASE)
         return base + html
+
+    def html_check(self, message_id: str) -> dict[str, Any]:
+        """How well the HTML works in email apps (Mailpit's caniemail.com-based check, offline)."""
+        data = self._request("GET", f"/api/v1/message/{check_id(message_id)}/html-check")
+        total = data.get("Total") or {}
+        warnings = []
+        for w in data.get("Warnings") or []:
+            results = w.get("Results") or []
+            notes = {str(k): _plain(v, markup=True) for k, v in (w.get("NotesByNumber") or {}).items()}
+
+            def apps(support: str) -> list[str]:
+                # "Outlook iOS (2021-11)" and "Outlook iOS (2023-05)" are one app for the reader.
+                return sorted({re.sub(r"\s*\([^)]*\)\s*$", "", r.get("Name") or "") for r in results
+                               if r.get("Support") == support} - {""})
+
+            score = w.get("Score") or {}
+            warnings.append({
+                "slug": w.get("Slug", ""), "title": _plain(w.get("Title", "")), "description": _plain(w.get("Description", "")),
+                "url": w.get("URL") if str(w.get("URL", "")).startswith("https://www.caniemail.com/") else "",
+                "category": w.get("Category", ""), "unsupported": round(float(score.get("Unsupported") or 0), 1),
+                "partial": round(float(score.get("Partial") or 0), 1), "not_in": apps("no"), "partly_in": apps("partial"),
+                "notes": list(dict.fromkeys(notes.values())),
+            })
+        warnings.sort(key=lambda w: (-w["unsupported"], -w["partial"], w["title"]))
+        platforms = data.get("Platforms") or {}
+        return {"tests": int(total.get("Tests") or 0), "supported": round(float(total.get("Supported") or 0), 1),
+                "partial": round(float(total.get("Partial") or 0), 1), "unsupported": round(float(total.get("Unsupported") or 0), 1),
+                "apps": len({app for names in platforms.values() for app in (names or [])}), "warnings": warnings}
+
+    def link_check(self, message_id: str, follow: bool = False) -> dict[str, Any]:
+        """Visit every link and image in the message (this goes out to the internet)."""
+        query = "?follow=true" if follow else ""
+        data = self._request("GET", f"/api/v1/message/{check_id(message_id)}/link-check{query}")
+        links = [{"url": str(l.get("URL") or ""), "code": int(l.get("StatusCode") or 0), "status": str(l.get("Status") or "")}
+                 for l in data.get("Links") or []]
+        links.sort(key=lambda l: (200 <= l["code"] < 400, l["url"]))
+        return {"errors": int(data.get("Errors") or 0), "links": links}
 
     def headers(self, message_id: str) -> dict[str, list[str]]:
         data = self._request("GET", f"/api/v1/message/{check_id(message_id)}/headers")

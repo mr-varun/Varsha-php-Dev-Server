@@ -31,6 +31,24 @@ from varsha.web.server import bind_panel
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/AwAAFAAH+p9aktwAAAABJRU5ErkJggg==")
 
 
+# Shaped like Mailpit 1.22's real /html-check answer.
+HTML_CHECK = {
+    "Total": {"Tests": 181, "Nodes": 10, "Supported": 87.44681, "Partial": 2.5531917, "Unsupported": 10},
+    "Platforms": {"ios": ["Apple Mail", "Outlook"], "windows": ["Outlook", "Mozilla Thunderbird"], "android": ["Gmail"]},
+    "Warnings": [
+        {"Slug": "css-width", "Title": "width", "Description": "", "URL": "https://www.caniemail.com/features/css-width/",
+         "Category": "css", "Results": [{"Name": "Outlook Windows (2007)", "Support": "partial", "NoteNumber": "1"}],
+         "NotesByNumber": {"1": "Partial. Replaced by a <code>&lt;div&gt;</code>."},
+         "Score": {"Found": 1, "Supported": 0, "Partial": 12, "Unsupported": 0}},
+        {"Slug": "html-script", "Title": "<script> element", "Description": "JavaScript is not supported in any email client.",
+         "URL": "javascript:alert(1)", "Category": "html",
+         "Results": [{"Name": "Outlook iOS (2021-11)", "Support": "no"}, {"Name": "Outlook iOS (2023-05)", "Support": "no"},
+                     {"Name": "Gmail Android (2022-01)", "Support": "no"}],
+         "NotesByNumber": {}, "Score": {"Found": 1, "Supported": 0, "Partial": 0, "Unsupported": 100}},
+    ],
+}
+
+
 def make_message(i: int, read: bool = False) -> dict[str, Any]:
     return {
         "ID": f"msg{i:04d}", "MessageID": f"m{i}@mailpit", "Read": read,
@@ -97,6 +115,12 @@ class FakeMailpit:
                         self._json({"Subject": [m["Subject"]], "To": ["Varun <varun@example.com>"]})
                     elif path[5] == "raw":
                         self._send(200, b"Subject: " + m["Subject"].encode() + b"\r\n\r\nbody", "message/rfc822")
+                    elif path[5] == "html-check":
+                        self._json(HTML_CHECK)
+                    elif path[5] == "link-check":
+                        self._json({"Errors": 1, "Links": [
+                            {"URL": "https://shop.test/ok", "StatusCode": 200, "Status": "OK"},
+                            {"URL": "https://example.com/gone", "StatusCode": 404, "Status": "Not Found"}]})
                     elif path[5] == "part" and path[6] == "1.2":
                         self._send(200, PNG, "image/png")
                     elif path[5] == "part" and path[6] == "2":
@@ -327,3 +351,34 @@ def test_mail_actions_need_the_panel_header_and_explicit_ids(panel_mail) -> None
     assert mailpit.messages[0]["Read"] is True
     assert web.post("/api/mail/delete", {"all": True})[0] == 200
     assert mailpit.messages == []
+
+
+def test_html_compatibility_report(mailpit: FakeMailpit, client: MailpitClient) -> None:
+    mailpit.add(1)
+    report = client.html_check("msg0001")
+    assert (report["tests"], report["supported"], report["unsupported"], report["apps"]) == (181, 87.4, 10.0, 4)
+    first, second = report["warnings"]
+    assert first["slug"] == "html-script" and first["unsupported"] == 100  # worst first
+    assert first["title"] == "<script> element"  # a literal tag name in a title stays (the panel escapes it)
+    assert first["not_in"] == ["Gmail Android", "Outlook iOS"]  # versions merged into one app
+    assert first["url"] == ""  # only caniemail.com links are passed on
+    assert second["notes"] == ["Partial. Replaced by a <div>."]  # their HTML becomes plain text
+    assert second["partly_in"] == ["Outlook Windows"] and second["url"].startswith("https://www.caniemail.com/")
+
+
+def test_link_check_lists_broken_links_first(mailpit: FakeMailpit, client: MailpitClient) -> None:
+    mailpit.add(1)
+    result = client.link_check("msg0001", follow=True)
+    assert result["errors"] == 1 and [l["code"] for l in result["links"]] == [404, 200]
+    assert ("GET", "/api/v1/message/msg0001/link-check", {"follow": "true"}) in mailpit.calls
+    client.link_check("msg0001")
+    assert ("GET", "/api/v1/message/msg0001/link-check", {}) in mailpit.calls
+
+
+def test_panel_routes_for_the_checks(panel_mail) -> None:  # type: ignore[no-untyped-def]
+    _app, web, mailpit = panel_mail
+    mailpit.add(1)
+    status, _, body = web.request("GET", "/api/mail/message/msg0001/html-check")
+    assert status == 200 and json.loads(body)["warnings"][0]["slug"] == "html-script"
+    status, _, body = web.request("GET", "/api/mail/message/msg0001/link-check?follow=1")
+    assert status == 200 and json.loads(body)["errors"] == 1
