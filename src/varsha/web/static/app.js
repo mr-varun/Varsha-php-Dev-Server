@@ -671,7 +671,7 @@ function lanCard() {
     ${notes.join("")}
     <div class="share-form">
       <select class="input" id="lan-site" aria-label="Site to share on the LAN" ${free.length ? "" : "disabled"}>
-        ${free.length ? free.map((s) => `<option value="${esc(s.domain)}">${esc(s.domain)}</option>`).join("") : "<option>every site is shared</option>"}</select>
+        ${free.length ? free.map((s) => `<option value="${esc(s.domain)}">${esc(s.domain)}</option>`).join("") : `<option>${S.sites.length ? "every site is shared" : "no sites yet: add a folder to www\\"}</option>`}</select>
       <button class="btn btn-blue" data-act="lan-share" ${ready && free.length ? "" : "disabled"}>Share on LAN</button>
     </div>
     <p class="muted">Colleagues on the same network open <b>https://${esc(lan.address || "this-pc")}:port/</b>. The site runs exactly as on
