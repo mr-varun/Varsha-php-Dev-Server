@@ -82,6 +82,13 @@ def make_payload() -> None:
     shutil.rmtree(PAYLOAD / "_internal", ignore_errors=True)
     shutil.copytree(DIST / "_internal", PAYLOAD / "_internal")
     shutil.copy2(DIST / "Varsha.exe", PAYLOAD / "Varsha.exe")
+    # Data files are plain files in the build, so refresh them from the repo even with --skip-build
+    # (only Python code changes need a new PyInstaller build).
+    internal = PAYLOAD / "_internal"
+    shutil.copytree(REPO / "etc" / "templates", internal / "etc" / "templates", dirs_exist_ok=True)
+    shutil.copytree(REPO / "src" / "varsha" / "web" / "static", internal / "varsha" / "web" / "static", dirs_exist_ok=True)
+    for name in ("services.json", "settings.json"):
+        shutil.copy2(REPO / "config" / name, internal / "config" / name)
     # bin: hard links (same drive), so the payload costs no space and is always current.
     # Removing the old links never touches the real files in REPO\bin.
     shutil.rmtree(PAYLOAD / "bin", ignore_errors=True)
