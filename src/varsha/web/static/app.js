@@ -339,7 +339,7 @@ function viewDatabases() {
   const list = dbs();
   const note = apacheUp() ? "" : `<div class="banner banner-blue"><p>phpMyAdmin runs inside Apache: start Apache to use it.</p>
     <button class="btn btn-mint" data-act="start" data-id="apache">\u25b6 Start Apache</button></div>`;
-  const local = list.length ? `<div class="db-grid">${list.map(dbCard).join("")}</div>`
+  const local = list.length ? `<div class="db-grid db-row-3">${list.map(dbCard).join("")}</div>`
     : `<div class="empty"><h3>No local databases</h3><p>Add MySQL or MariaDB entries to <code>config\\services.json</code>.</p></div>`;
   return note + local + remoteSection();
 }
@@ -461,7 +461,7 @@ function remoteSection() {
       It appears in phpMyAdmin's server list; with a saved password phpMyAdmin logs in by itself.
       The RDS security group must allow your IP address.</p>
       <button class="btn btn-ink" data-act="remote-add">+ Add remote database</button></div>
-    ${S.remote_dbs.length ? `<div class="db-grid">${cards}</div>` : ""}`;
+    ${S.remote_dbs.length ? `<div class="db-grid db-row-3">${cards}</div>` : ""}`;
 }
 
 // ---------------------------------------------------------------- share view
