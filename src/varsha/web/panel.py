@@ -23,6 +23,7 @@ from typing import Any
 from varsha import __version__
 from varsha.config_engine.engine import ConfigEngine
 from varsha.devtools import DevTools
+from varsha.doctor import Doctor
 from varsha.errors import ConfigError, ServiceError, VarshaError
 from varsha.mail.mailpit import MailpitClient, MailWatcher
 from varsha.paths import AppPaths
@@ -104,6 +105,8 @@ class PanelApp:
         self.scheduler = Scheduler(manager, self.databases, paths.config / "schedule.json",
                                    paths.data / "schedule-state.json", notify=self._job_done,
                                    prepare_task=self._prepare_task, logs_dir=paths.logs, background=True)
+        self.doctor = Doctor(paths, manager, engine, sites, self.scheduler, self.databases,
+                             dns_route=self.dns_route_active)
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)

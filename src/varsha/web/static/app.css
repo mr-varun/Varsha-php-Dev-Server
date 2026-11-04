@@ -804,3 +804,28 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
   font: 12px/1.5 var(--mono); background: var(--term-bg); color: var(--log-text, #4ade80); border: var(--line-thin); border-radius: var(--radius-sm);
 }
 .toast-warn { background: var(--yellow); }
+
+/* ------------------------------------------------------------------ doctor */
+
+.doc-head { display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap; margin-bottom: var(--s5); }
+.doc-head p { margin: 4px 0 0; max-width: 720px; }
+.doc-summary { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.doc-when { font-size: 12.5px; }
+.doc-run { min-height: 48px; padding: 8px 22px; font-size: 16px; }
+.doc-group { margin-bottom: var(--s4); }
+.doc-group .section-title { margin: var(--s4) 0 var(--s2); }
+.doc-row {
+  display: flex; align-items: center; gap: var(--s3); padding: 10px var(--s4); margin-bottom: 8px;
+  background: var(--card); border: var(--line-thin); border-radius: var(--radius-sm); box-shadow: var(--shadow-xs);
+}
+.doc-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border: var(--line-thin); border-radius: 50%;
+  font-weight: 800; font-size: 14px; background: var(--paper); }
+.doc-ok .doc-icon { background: var(--mint); color: #121212; }
+.doc-warn { background: #fff7d6; }
+.doc-warn .doc-icon { background: var(--yellow); color: #121212; }
+.doc-fail { background: var(--coral-soft); }
+.doc-fail .doc-icon { background: var(--coral); color: #121212; }
+.doc-info .doc-icon { background: var(--sky); color: #121212; }
+.doc-title { font-weight: 700; }
+.doc-detail { margin-top: 2px; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (prefers-color-scheme: dark) { .doc-warn { background: #3d3415; } }

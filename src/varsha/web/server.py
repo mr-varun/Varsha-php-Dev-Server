@@ -451,6 +451,12 @@ class PanelHandler(BaseHTTPRequestHandler):
                 message = app.open_php_error(gid)
             app.events.publish("state")
             self._json(HTTPStatus.OK, {"message": message})
+        elif path == "/api/doctor/run":
+            self._json(HTTPStatus.OK, app.doctor.run())
+        elif path == "/api/doctor/fix":
+            message = app.doctor.fix(str(body.get("fix", "")))
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"message": message})
         elif path == "/api/import/inspect":
             self._json(HTTPStatus.OK, app.import_inspect(body))
         elif m := re.fullmatch(r"/api/import/([0-9a-f]{12})/run", path):

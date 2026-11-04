@@ -14,6 +14,7 @@ const VIEWS = {
   share: { title: "Share", eyebrow: "cloudflare tunnel" },
   logs: { title: "Logs", eyebrow: "live output" },
   system: { title: "System", eyebrow: "php \u00b7 https \u00b7 dns \u00b7 folders" },
+  doctor: { title: "Doctor", eyebrow: "check everything \u00b7 one click" },
 };
 const BUSY = new Set(["starting", "stopping"]);
 const OFF = new Set(["missing", "disabled"]);
@@ -942,6 +943,85 @@ function onMailEvent(data) {
   for (const m of (data.new || []).slice(0, 3)) mailToast(m);
 }
 
+// ---------------------------------------------------------------- doctor view
+// Built once; a run replaces the results. Fixes map onto existing actions where one exists.
+
+const DOC = { result: null, running: false };
+const DOC_ICON = { fail: "✖", warn: "⚠", info: "ℹ", ok: "✔" };
+
+function doctorFixButton(f) {
+  if (!f.fix) return "";
+  const [kind, arg] = [f.fix.split(":")[0], f.fix.split(":").slice(1).join(":")];
+  const btn = (label, attrs) => `<button class="btn btn-sm btn-ink" ${attrs}>${label}</button>`;
+  switch (kind) {
+    case "hosts": return btn("Update hosts file", 'data-act="doc-hosts"');
+    case "trust": return btn("Trust HTTPS", 'data-act="doc-trust"');
+    case "renew-certs": return btn("Renew certificates", `data-act="doc-fix" data-ref="${esc(f.fix)}"`);
+    case "stop-pid": return btn("Stop it", `data-act="doc-fix" data-ref="${esc(f.fix)}"`);
+    case "goto": return btn(`Open ${esc(VIEWS[arg] ? VIEWS[arg].title : arg)} →`, `data-act="goto" data-view="${esc(arg)}"`);
+    case "log": return btn("Show log", `data-act="view-log" data-id="${esc(arg)}"`);
+    case "php": return btn("Configure PHP…", `data-act="php-config" data-id="${esc(arg)}"`);
+    default: return "";
+  }
+}
+
+function viewDoctorSkeleton() {
+  return `<div class="doctor" id="doctor">
+      <div class="doc-head card">
+        <div class="grow"><h2 class="card-title">Check the whole setup</h2>
+          <p class="muted">Services, ports, leftover processes, Apache's config, sites and hosts, HTTPS certificates,
+            every PHP build, disk space, backups and config files. Nothing is changed until you press a fix.</p></div>
+        <div class="doc-summary" id="doc-summary"></div>
+        <button class="btn btn-blue doc-run" data-act="doc-run">↻ Check everything</button>
+      </div>
+      <div id="doc-results"></div>
+    </div>`;
+}
+
+function renderDoctor() {
+  const box = $("#doc-results");
+  if (!box) return;
+  const r = DOC.result;
+  $("#doc-summary").innerHTML = DOC.running ? `<span class="chip chip-yellow">⏳ checking…</span>`
+    : r ? `${r.counts.fail ? `<span class="chip chip-coral">${plural(r.counts.fail, "problem")}</span>` : ""}
+           ${r.counts.warn ? `<span class="chip chip-yellow">${plural(r.counts.warn, "warning")}</span>` : ""}
+           <span class="chip chip-mint">${r.counts.ok} OK</span>
+           <span class="muted doc-when">checked ${esc(fmtWhen(r.checked_at))} in ${r.took} s</span>` : "";
+  document.querySelector(".doc-run").disabled = DOC.running;
+  if (!r) { box.innerHTML = DOC.running ? `<div class="empty"><p>Checking… this takes a few seconds.</p></div>` : ""; return; }
+  const groups = [];
+  for (const f of r.findings) {
+    let g = groups.find((x) => x.name === f.group);
+    if (!g) groups.push(g = { name: f.group, items: [] });
+    g.items.push(f);
+  }
+  box.innerHTML = groups.map((g) => `<section class="doc-group">
+      <h3 class="section-title">${esc(g.name)}</h3>
+      ${g.items.map((f) => `<div class="doc-row doc-${esc(f.status)}">
+          <span class="doc-icon" aria-label="${esc(f.status)}">${DOC_ICON[f.status]}</span>
+          <div class="grow"><div class="doc-title">${esc(f.title)}</div>${f.detail ? `<div class="doc-detail">${esc(f.detail)}</div>` : ""}</div>
+          ${doctorFixButton(f)}</div>`).join("")}
+    </section>`).join("");
+}
+
+async function runDoctor() {
+  if (DOC.running) return;
+  DOC.running = true;
+  renderDoctor();
+  try { DOC.result = await api.post("/api/doctor/run"); }
+  catch (err) { toast({ ok: false, title: "Doctor", message: err.message }); }
+  DOC.running = false;
+  renderDoctor();
+}
+
+async function doctorAction(path, body) {
+  try {
+    const r = await api.post(path, body);
+    if (r && r.message) toast({ ok: true, title: "Doctor", message: r.message });
+  } catch (err) { toast({ ok: false, title: "Doctor", message: err.message }); return; }
+  setTimeout(runDoctor, path.startsWith("/api/doctor") ? 300 : 2500);  // background actions need a moment
+}
+
 // ---------------------------------------------------------------- PHP errors view
 // Like the Mail view, it is built once and refreshed in place (filters and open stack traces stay).
 
@@ -1178,6 +1258,10 @@ function render() {
   logsTail.stop();
   if (view === "errors") {
     if (!$("#errors")) { host.innerHTML = viewErrorsSkeleton(); loadErrors(); }
+    return;
+  }
+  if (view === "doctor") {
+    if (!$("#doctor")) { host.innerHTML = viewDoctorSkeleton(); renderDoctor(); if (!DOC.result) runDoctor(); }
     return;
   }
   if (view === "mail") {
@@ -1497,6 +1581,10 @@ document.addEventListener("click", async (event) => {
     case "php-config": phpDialog(id); return;
     case "ini-add": $("#ini-rows").insertAdjacentHTML("beforeend", iniRow("", "", $("#ini-rows").children.length)); return;
     case "quit": quitDialog(); return;
+    case "doc-run": runDoctor(); return;
+    case "doc-fix": doctorAction("/api/doctor/fix", { fix: ref }); return;
+    case "doc-hosts": doctorAction("/api/hosts/update"); return;
+    case "doc-trust": doctorAction("/api/https/trust"); return;
     case "err-filter": ERR.severity = ref || ""; document.querySelectorAll("#errors .seg-btn").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.ref === ERR.severity))); loadErrors(); return;
     case "err-open": { const r = await errPost(`/api/php-errors/${id}/open`); if (r) toast({ ok: true, title: "PHP error", message: r.message }); return; }
     case "err-mute": case "err-unmute": if (await errPost(`/api/php-errors/${id}/${action.slice(4)}`)) loadErrors(); return;
@@ -1579,7 +1667,7 @@ document.addEventListener("toggle", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.target.closest("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
-  const index = "123456789".indexOf(event.key);
+  const index = "1234567890".indexOf(event.key);
   if (index >= 0) go(Object.keys(VIEWS)[index]);
   if (event.key === "Escape" && openMenu) { openMenu = null; render(); }
 });
