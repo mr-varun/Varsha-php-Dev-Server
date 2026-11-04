@@ -18,11 +18,12 @@ from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from varsha.config_engine.engine import ConfigEngine
-from varsha.errors import ServiceError
+from varsha.errors import ConfigError, ServiceError
 from varsha.helper import elevate
+from varsha.services import ports as port_check
 from varsha.services.manager import ServiceManager
 from varsha.services.models import ServiceState
-from varsha.sites import hosts
+from varsha.sites import hosts, lan
 from varsha.sites.discovery import Site
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,7 @@ class SiteManager:
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
         self.last_error = ""
+        self.lan = lan.LanShares(self.paths)
 
     def set_listener(self, listener: Listener | None) -> None:
         self._listener = listener
@@ -119,6 +121,7 @@ class SiteManager:
             apache = self.services.definition(self.apache_id)
             try:
                 changed = self.engine.generate_sites(apache)
+                changed |= self._render_lan()
                 if changed and self.services.status(self.apache_id).state is ServiceState.RUNNING:
                     logger.info("Sites changed: %s", self.services.reload(self.apache_id))
                 self.last_error = ""
@@ -129,6 +132,102 @@ class SiteManager:
             finally:
                 self._notify()
             return changed
+
+    # ------------------------------------------------------------------ LAN sharing
+
+    def _render_lan(self) -> bool:
+        self.lan.keep_only({site.domain for site in self.sites()})
+        shares = self.lan.shares
+        address = self.lan.address() if shares else None
+        try:
+            changed = self.engine.generate_lan(shares, address, self.lan.cert_names() if shares else [])
+        except ConfigError as exc:
+            raise ServiceError(str(exc), self.apache_id) from exc
+        self.lan.rendered_address = address
+        return changed
+
+    def apache_exe(self) -> Path | None:
+        try:
+            inst = self.services.installation(self.apache_id)
+        except ServiceError:
+            return None
+        return inst.exe if inst is not None else None
+
+    def lan_status(self, refresh: bool = False) -> dict[str, object]:
+        status = self.lan.status(self.apache_exe(), refresh)
+        status["apache_running"] = self._apache_running()
+        if self.lan.shares and status["address"] != self.lan.rendered_address:
+            self._schedule()  # the PC moved to another network: point the shares at the new address
+        return status
+
+    def _apache_running(self) -> bool:
+        try:
+            return self.services.status(self.apache_id).state is ServiceState.RUNNING
+        except ServiceError:  # no Apache in services.json
+            return False
+
+    def lan_firewall(self, enable: bool) -> str:
+        program = self.apache_exe()
+        if enable and program is None:
+            raise ServiceError("Apache isn't installed in bin\\apache", self.apache_id)
+        args = ["firewall-lan-add", "--program", str(program)] if enable else ["firewall-lan-remove"]
+
+        def verify() -> str | None:
+            ok = self.lan.firewall(program, refresh=True)
+            if ok != enable:
+                return None
+            return f"Firewall allows ports {lan.PORT_RANGE} on private networks" if enable else "Firewall rule removed"
+
+        try:
+            return elevate.run_elevated(self.paths, args, verify=verify)
+        finally:
+            self.lan.forget_cache()
+            self._notify()
+
+    def lan_share(self, domain: str) -> str:
+        """Share one site on the LAN: firewall rule (first time only), port, vhost, reload."""
+        if domain not in {site.domain for site in self.sites()}:
+            raise ValueError(f"unknown site {domain}")
+        if not self._apache_running():
+            raise ServiceError("Start Apache first: LAN sharing runs inside it", self.apache_id)
+        if not self.engine.mkcert_exe.is_file():
+            raise ServiceError("LAN sharing needs HTTPS: put mkcert at bin\\mkcert\\mkcert.exe", self.apache_id)
+        address = self.lan.address()
+        if address is None:
+            raise ServiceError("This PC isn't connected to a network (no LAN address)", self.apache_id)
+        if not self.lan.firewall(self.apache_exe(), refresh=True):
+            self.lan_firewall(True)
+        current = self.lan.shares.get(domain)
+        if current is None:
+            port = self.lan.pick_port(domain, lambda p: not port_check.check_ports([p]))
+            self.lan.add(domain, port)
+        try:
+            self.sync()
+        except ServiceError:
+            if current is None:
+                self.lan.remove(domain)
+                self._sync_quietly()
+            raise
+        port = self.lan.shares[domain]
+        return f"{domain} is on the LAN: https://{address}:{port}/"
+
+    def lan_unshare(self, domain: str) -> str:
+        if not self.lan.remove(domain):
+            return f"{domain} wasn't shared on the LAN"
+        self.sync()
+        return f"{domain} is no longer shared on the LAN"
+
+    def lan_stop_all(self) -> None:
+        """On quit and at startup: no share outlives varsha, even when Apache keeps running.
+        Also removes LAN files a crashed session left behind."""
+        self.lan.clear()
+        with self._lock:
+            try:
+                changed = self.engine.generate_lan({}, None, [])
+                if changed and self._apache_running():
+                    logger.info("LAN shares removed: %s", self.services.reload(self.apache_id))
+            except (ServiceError, ConfigError, OSError) as exc:
+                logger.warning("Removing LAN shares failed: %s", exc)
 
     def update_hosts(self) -> str:
         """Write all site names into varsha's hosts block via megha (UAC prompt)."""
@@ -167,6 +266,7 @@ class SiteManager:
         observer.daemon = True
         observer.start()
         self._observer = observer
+        self.lan.warm()
         logger.info("Watching %s for new sites", self.paths.www)
 
     def stop_watching(self) -> None:

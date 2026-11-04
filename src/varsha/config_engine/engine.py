@@ -59,6 +59,7 @@ APACHE_MODULES: tuple[tuple[str, str], ...] = (
     ("setenvif_module", "mod_setenvif.so"),
     ("socache_shmcb_module", "mod_socache_shmcb.so"),
     ("ssl_module", "mod_ssl.so"),
+    ("substitute_module", "mod_substitute.so"),  # LAN sharing rewrites the site's own links
     ("fcgid_module", "mod_fcgid.so"),
 )
 
@@ -273,6 +274,48 @@ class ConfigEngine:
                     logger.info("Removed vhost %s (folder gone)", old.name)
             except OSError as exc:
                 logger.warning("Could not check %s: %s", old, exc)
+        return changed
+
+    @property
+    def lan_dir(self) -> Path:
+        return self.paths.etc / "apache" / "lan-enabled"
+
+    def generate_lan(self, shares: dict[str, int], address: str | None, cert_names: Sequence[str]) -> bool:
+        """Write one LAN vhost per shared site ({domain: port}) and delete every other LAN file.
+        An empty `shares` (or no address) removes them all. Returns True if anything changed."""
+        folder = self.lan_dir
+        expected: set[str] = set()
+        changed = False
+        if shares and address:
+            folder.mkdir(parents=True, exist_ok=True)
+            pair = self.ensure_cert("lan", list(cert_names))
+            if pair is None:
+                raise ConfigError("Sharing on the LAN needs HTTPS: put mkcert at bin\\mkcert\\mkcert.exe")
+            sites = {site.domain: site for site in self.sites()}
+            default = self.default_php()
+            for domain, port in sorted(shares.items()):
+                site = sites.get(domain)
+                if site is None:
+                    continue
+                build = self.find_php(site.php) if site.php else None
+                site_php = self.php_context(build) if build and (default is None or build.folder != default.folder) else None
+                context = {"site": site, "docroot": site.docroot.as_posix(), "port": port, "address": address,
+                           "domain_re": re.escape(site.domain), "cert": pair.cert, "key": pair.key, "php": site_php,
+                           "system_root": os.environ.get("SystemRoot", "C:/Windows").replace("\\", "/"),
+                           "data": self.paths.data.as_posix()}
+                target = folder / f"{domain}.conf"
+                expected.add(target.name)
+                changed |= self.render("lan.conf.j2", context, target)
+        if folder.is_dir():
+            for old in folder.glob("*.conf*"):
+                if old.name in expected:
+                    continue
+                try:
+                    if old.suffix == ".bak" or old.read_text(encoding="utf-8").startswith(GENERATED_MARK):
+                        old.unlink()
+                        changed |= old.suffix == ".conf"
+                except OSError as exc:
+                    logger.warning("Could not remove %s: %s", old, exc)
         return changed
 
     # ------------------------------------------------------------------ PHP

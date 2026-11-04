@@ -160,7 +160,9 @@ function phpSelect(site) {
   return `<select class="select" data-site-php="${esc(site.domain)}" aria-label="PHP version for ${esc(site.domain)}">${options.join("")}</select>`;
 }
 const siteChips = (site) => `<span class="chip ${site.https ? "chip-mint" : ""}">${site.https ? `${LOCK} HTTPS` : "HTTP only"}</span>
-  <span class="chip ${site.in_hosts ? "chip-blue" : "chip-yellow"}">${site.in_hosts ? "hosts \u2714" : "not in hosts"}</span>`;
+  <span class="chip ${site.in_hosts ? "chip-blue" : "chip-yellow"}">${site.in_hosts ? "hosts \u2714" : "not in hosts"}</span>${lanShare(site.domain)
+    ? `<span class="chip chip-ink" title="${esc(lanShare(site.domain).url || "")}">LAN :${lanShare(site.domain).port}</span>` : ""}`;
+const lanShare = (domain) => ((S.lan && S.lan.shares) || []).find((s) => s.domain === domain);
 
 // ---------------------------------------------------------------- shell
 
@@ -168,7 +170,7 @@ function renderShell() {
   document.querySelectorAll(".nav-item").forEach((b) => {
     if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     b.querySelector(".nav-badge")?.remove();
-    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length, mail: S.mail.unread,
+    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length + ((S.lan && S.lan.shares) || []).length, mail: S.mail.unread,
                 tasks: (S.tasks || []).filter((t) => t.enabled && t.last_ok === false).length,
                 errors: S.php_errors ? S.php_errors.unseen_errors + S.php_errors.unseen_warnings : 0 }[b.dataset.view];
     if (n) b.insertAdjacentHTML("beforeend", `<span class="nav-badge">${n}</span>`);
@@ -362,7 +364,10 @@ function viewSites() {
           ${site.https ? `<a class="btn btn-sm" href="${esc(site.url.replace("https://", "http://"))}" target="_blank" rel="noopener">http</a>` : ""}
           <button class="btn btn-sm" data-act="open" data-what="site" data-ref="${esc(site.domain)}">Folder</button>
           <button class="btn btn-sm" data-act="terminal" data-ref="${esc(site.domain)}">Terminal</button>
-          <button class="btn btn-sm" data-act="share-site" data-ref="${esc(site.domain)}">Share</button>
+          <button class="btn btn-sm" data-act="share-site" data-ref="${esc(site.domain)}" title="A public link through Cloudflare">Share</button>
+          ${lanShare(site.domain)
+            ? `<button class="btn btn-sm btn-ink" data-act="lan-stop" data-ref="${esc(site.domain)}" title="Stop sharing on the LAN">Stop LAN</button>`
+            : `<button class="btn btn-sm" data-act="lan-share" data-ref="${esc(site.domain)}" title="Let colleagues on the same Wi-Fi open it">LAN</button>`}
           <button class="btn btn-sm btn-coral" data-act="site-delete" data-ref="${esc(site.domain)}" title="Move to the Recycle Bin">Delete</button>
         </div></article>`).join("")}</div>`);
   }
@@ -633,12 +638,54 @@ function remoteSection() {
 
 // ---------------------------------------------------------------- share view
 
+function lanCard() {
+  const lan = S.lan || { shares: [] };
+  const notes = [];
+  if (!lan.address) {
+    notes.push(`<div class="banner banner-coral"><p><b>No network.</b> This PC has no LAN address: connect to the Wi-Fi first.</p></div>`);
+  } else if (lan.category === "Public") {
+    notes.push(`<div class="banner banner-yellow"><p><b>Windows treats \u201c${esc(lan.interface)}\u201d as a Public network</b>, so the firewall blocks colleagues.
+      Make it Private: Settings \u2192 Network &amp; internet \u2192 ${esc(lan.interface)} \u2192 your network \u2192 Network profile type \u2192 <b>Private</b>.</p></div>`);
+  }
+  if (!S.system.mkcert) notes.push(`<div class="banner banner-coral"><p>LAN sharing uses HTTPS: put mkcert at <code>bin\\mkcert\\mkcert.exe</code>.</p></div>`);
+  if (!lan.apache_running) {
+    notes.push(`<div class="banner banner-blue"><p>LAN sharing runs inside Apache: start Apache first.</p>
+      <button class="btn btn-mint" data-act="start" data-id="apache">\u25b6 Start Apache</button></div>`);
+  }
+  const shared = new Set(lan.shares.map((s) => s.domain));
+  const free = S.sites.filter((s) => !shared.has(s.domain));
+  const ready = lan.address && lan.apache_running && S.system.mkcert;
+  const rows = lan.shares.map((s) => `<div class="tunnel">
+      <div class="grow"><div class="muted">${esc(s.domain)}</div>
+        <a class="tunnel-url" href="${esc(s.url || "#")}" target="_blank" rel="noopener">${esc(s.url || "waiting for a network\u2026")}</a></div>
+      <div class="row">${s.url ? `<button class="btn btn-sm" data-act="copy" data-text="${esc(s.url)}">Copy</button>` : ""}
+        <button class="btn btn-sm btn-coral" data-act="lan-stop" data-ref="${esc(s.domain)}">Stop</button></div></div>`).join("");
+  const firewall = lan.firewall
+    ? `<span class="muted">\u2714 Firewall allows ports ${esc(lan.port_range)} on private networks.</span>
+       <button class="btn btn-sm" data-act="lan-firewall-remove" title="Remove varsha's firewall rule (UAC prompt)">Remove rule</button>`
+    : `<span class="muted">The first share asks Windows (one UAC prompt) to allow ports ${esc(lan.port_range)} for varsha's Apache, on private networks only.</span>`;
+  return `<div class="card"><div class="card-head"><h3 class="card-title">On your Wi-Fi (LAN)</h3>
+      <span class="chip chip-ink">${lan.address ? `this PC: ${esc(lan.address)}` : "offline"}</span></div>
+    ${notes.join("")}
+    <div class="share-form">
+      <select class="input" id="lan-site" aria-label="Site to share on the LAN" ${free.length ? "" : "disabled"}>
+        ${free.length ? free.map((s) => `<option value="${esc(s.domain)}">${esc(s.domain)}</option>`).join("") : "<option>every site is shared</option>"}</select>
+      <button class="btn btn-blue" data-act="lan-share" ${ready && free.length ? "" : "disabled"}>Share on LAN</button>
+    </div>
+    <p class="muted">Colleagues on the same network open <b>https://${esc(lan.address || "this-pc")}:port/</b>. The site runs exactly as on
+      <b>.${esc(S.tld)}</b>: it still sees its own name, and its links are rewritten to the LAN address. Their browser warns about the
+      certificate once (Advanced \u2192 Continue). Only the shared site is reachable: phpMyAdmin, this panel and the databases stay on this PC.
+      Every LAN share ends when you quit varsha.</p>
+    ${rows ? `<div class="lan-list">${rows}</div>` : ""}
+    <div class="row lan-firewall">${firewall}</div></div>`;
+}
+
 function viewShare() {
-  const parts = [];
+  const parts = [lanCard()];
   if (!S.system.cloudflared) {
     parts.push(`<div class="banner banner-coral"><p><b>cloudflared is missing.</b> Put it at <code>bin\\cloudflared\\cloudflared.exe</code>.</p></div>`);
   }
-  parts.push(`<div class="card"><div class="card-head"><h3 class="card-title">Put a local site online</h3>
+  parts.push(`<div class="card"><div class="card-head"><h3 class="card-title">Put a local site online (internet)</h3>
       <span class="chip chip-ink">no account needed</span></div>
       <form class="share-form" data-form="share">
         <input class="input" id="share-target" name="target" placeholder="myapp.${esc(S.tld)}  or  localhost:8080" autocomplete="off" spellcheck="false" aria-label="Local address to share">
@@ -1669,6 +1716,16 @@ document.addEventListener("click", async (event) => {
     case "autobackup-run": await act(`/api/services/${id}/autobackup-run`); return;
     case "unshare": await act(`/api/tunnels/${id}/stop`); break;
     case "share-site": go("share"); $("#share-target").value = ref; $("#share-target").focus(); return;
+    case "lan-share": {
+      const domain = ref || $("#lan-site")?.value;
+      if (domain) await act(`/api/lan/${encodeURIComponent(domain)}/share`);
+      return;
+    }
+    case "lan-stop": await act(`/api/lan/${encodeURIComponent(ref)}/stop`); return;
+    case "lan-firewall-remove":
+      confirmDialog("Remove the LAN firewall rule?", "Colleagues can't reach shared sites until you share one again (that asks for the rule again).",
+        "Remove", async () => { await api.post("/api/lan/firewall", { enable: false }); });
+      return;
     case "remote-add": remoteDialog(null); return;
     case "remote-edit": remoteDialog(remoteDb(id)); return;
     case "remote-test": await act("/api/remote-dbs/test", { ...remoteDb(id), password: "" }); return;

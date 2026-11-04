@@ -350,6 +350,8 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 }
 .tunnel + .tunnel { margin-top: var(--s3); }
 .tunnel-url { font: 700 16px var(--mono); overflow-wrap: anywhere; }
+.lan-list { margin-top: var(--s4); }
+.lan-firewall { margin-top: var(--s4); align-items: center; gap: var(--s3); }
 
 /* ------------------------------------------------------------------ logs */
 

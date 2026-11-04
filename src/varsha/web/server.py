@@ -400,6 +400,16 @@ class PanelHandler(BaseHTTPRequestHandler):
                  success=lambda status: f"Public link: {status.public_url}")
         elif m := re.fullmatch(r"/api/tunnels/(t\d+)/stop", path):
             task("Stop sharing", app.tunnels.stop, m.group(1))
+        elif m := re.fullmatch(r"/api/lan/([a-z0-9.-]+)/(share|stop)", path):
+            domain, verb = m.group(1), m.group(2)
+            if verb == "share":
+                task(f"Share {domain} on the LAN", app.sites.lan_share, domain, success=lambda msg: msg)
+            else:
+                task(f"Stop LAN sharing {domain}", app.sites.lan_unshare, domain, success=lambda msg: msg)
+        elif path == "/api/lan/firewall":
+            enable = body.get("enable") is True
+            task("Allow LAN sharing in the firewall" if enable else "Remove the LAN firewall rule",
+                 app.sites.lan_firewall, enable, success=lambda msg: msg)
         elif path == "/api/open":
             app.open_folder(str(body.get("what", "")), str(body.get("ref", "")))
             self._json(HTTPStatus.OK, {"ok": True})

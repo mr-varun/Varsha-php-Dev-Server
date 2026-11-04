@@ -1,0 +1,50 @@
+# varsha-generated LAN share: {{ site.domain }} on https://{{ address }}:{{ port }}/
+# Exists only while the site is shared on the LAN from the panel: varsha deletes this file when
+# sharing stops and when varsha quits. Edit etc/templates/lan.conf.j2 instead.
+#
+# Colleagues on the same network open https://{{ address }}:{{ port }}/. The site itself is unchanged:
+# it still sees "Host: {{ site.domain }}" over HTTPS, and links or redirects it builds for
+# https://{{ site.domain }} are rewritten to the LAN address on the way out. There is no proxy, so
+# Apache and PHP see the colleague's real IP: "Require local" (phpMyAdmin) keeps refusing them.
+
+Listen 0.0.0.0:{{ port }} https
+
+<VirtualHost *:{{ port }}>
+    ServerName {{ site.domain }}
+    DocumentRoot "{{ docroot }}"
+    SSLEngine on
+    SSLCertificateFile "{{ cert }}"
+    SSLCertificateKeyFile "{{ key }}"
+
+    # The app checks the host name (many frameworks only answer on their APP_URL).
+    RequestHeader set X-Forwarded-Host "{{ address }}:{{ port }}" early
+    RequestHeader set Host "{{ site.domain }}" early
+    # Uncompressed answers, so the links in them can be rewritten.
+    RequestHeader unset Accept-Encoding early
+
+    # Absolute links (also JSON-escaped ones, https:\/\/...) point at the LAN address instead.
+    # Apache turns \\ into \ inside quotes, so \\\\ below reaches the regex as \\ (a literal backslash).
+    SubstituteMaxLineLength 16m
+    AddOutputFilterByType SUBSTITUTE text/html text/css text/plain text/xml text/javascript application/javascript application/json application/xml application/xhtml+xml
+    Substitute "s|https?:(\\\\)?/(\\\\)?/{{ domain_re }}(:[0-9]+)?|https:$1/$2/{{ address }}:{{ port }}|i"
+    Header edit Location "^https?://{{ domain_re }}(:[0-9]+)?" "https://{{ address }}:{{ port }}"
+    Header always edit Location "^https?://{{ domain_re }}(:[0-9]+)?" "https://{{ address }}:{{ port }}"
+    Header always edit* Content-Security-Policy "https?://{{ domain_re }}(:[0-9]+)?" "https://{{ address }}:{{ port }}"
+    Header always edit Access-Control-Allow-Origin "^https?://{{ domain_re }}(:[0-9]+)?$" "https://{{ address }}:{{ port }}"
+    Header always edit* Set-Cookie "(?i);\s*domain=\.?{{ domain_re }}" ""
+{% if php %}
+
+    # This site runs PHP {{ php.label }} instead of the default.
+    <IfModule fcgid_module>
+        FcgidInitialEnv PHPRC "{{ php.ini_dir }}"
+        FcgidInitialEnv PATH "{{ php.folder }};{{ system_root }}/system32;{{ system_root }}"
+        FcgidInitialEnv SystemRoot "{{ system_root }}"
+        FcgidInitialEnv TEMP "{{ data }}/tmp"
+        FcgidInitialEnv TMP "{{ data }}/tmp"
+        FcgidInitialEnv PHP_FCGI_MAX_REQUESTS 0
+        <FilesMatch "\.php$">
+            FcgidWrapper "{{ php.cgi }}" .php
+        </FilesMatch>
+    </IfModule>
+{% endif %}
+</VirtualHost>

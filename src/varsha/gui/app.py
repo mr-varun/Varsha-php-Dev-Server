@@ -187,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
 
         def work() -> None:
             tunnels.stop_all()  # shared links never outlive varsha, even when services stay up
+            sites.lan_stop_all()  # nor do LAN shares (Apache reloads without them if it stays up)
             if stop_services:
                 try:
                     manager.stop_all()
@@ -201,6 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     main_thread.exit_loop.connect(app.quit)
 
     manager.adopt_running()
+    sites.lan_stop_all()  # a crashed session must not leave a site on the LAN
     manager.start_monitor()
     panel.mail_watch.start()
     panel.scheduler.start()

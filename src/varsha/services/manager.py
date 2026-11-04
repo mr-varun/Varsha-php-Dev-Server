@@ -110,6 +110,11 @@ class ServiceManager:
     def definition(self, service_id: str) -> ServiceDef:
         return self._get(service_id).defn
 
+    def installation(self, service_id: str) -> Installation | None:
+        """The binary in use (or that would be started); None when it isn't installed."""
+        rt = self._get(service_id)
+        return rt.installation or self._locate(rt.defn)
+
     def context(self, service_id: str) -> dict[str, object]:
         """Placeholder values for a service (raises ServiceError if it isn't installed)."""
         rt = self._get(service_id)

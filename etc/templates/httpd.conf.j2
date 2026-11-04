@@ -125,3 +125,6 @@ Alias /phpmyadmin "{{ phpmyadmin }}"
 
 # ---- One file per folder in www/: <name>.{{ tld }} ----
 IncludeOptional "{{ etc }}/apache/sites-enabled/*.conf"
+
+# ---- Sites shared on the LAN from the panel (none unless you turn it on; removed on quit) ----
+IncludeOptional "{{ etc }}/apache/lan-enabled/*.conf"

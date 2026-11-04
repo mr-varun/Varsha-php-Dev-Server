@@ -273,6 +273,7 @@ class PanelApp:
             "sites": [self._site_json(info) for info in self.sites.site_infos()],
             "site_error": self.sites.last_error,
             "tunnels": [self._tunnel_json(t) for t in self.tunnels.statuses()],
+            "lan": self.sites.lan_status(),
             "remote_dbs": self._remote_json(),
             "php": [{"label": b.label, "version": b.version, "folder": b.folder.name, "arch": b.arch,
                      "cgi": b.cgi_exe is not None,
