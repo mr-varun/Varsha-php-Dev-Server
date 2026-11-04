@@ -1,10 +1,10 @@
 @echo off
 rem Builds Setup.exe with the C# compiler that ships with Windows (.NET Framework 4).
-rem   build.cmd <output folder>     (tools\deploy.py passes Varsha-Setup)
+rem   build.cmd <output folder>     (tools\deploy.py passes setup)
 setlocal
 set "ROOT=%~dp0..\.."
 set "OUT=%~1"
-if "%OUT%"=="" set "OUT=%ROOT%\Varsha-Setup"
+if "%OUT%"=="" set "OUT=%ROOT%\setup"
 set "CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if not exist "%CSC%" set "CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe"
 if not exist "%OUT%" mkdir "%OUT%"

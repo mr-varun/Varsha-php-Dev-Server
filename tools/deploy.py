@@ -1,16 +1,16 @@
-"""Build the installer (Varsha-Setup\\) on D: and install the final app into C:\\Varsha with it.
+"""Build the installer (setup\\) on D: and install the final app into C:\\Varsha with it.
 
     tools\\deploy.cmd [--target C:\\Varsha] [--skip-build] [--no-install]
 
 What it does:
   1. builds Varsha.exe + _internal\\ with PyInstaller (tools\\varsha.spec) into build\\dist\\Varsha
      (code, web panel, templates and default config are all inside the build)
-  2. refreshes Varsha-Setup\\payload: the build, plus bin\\ as hard links to this repo's bin\\
+  2. refreshes setup\\payload: the build, plus bin\\ as hard links to this repo's bin\\
      (no second 1.3 GB copy on D:; phpMyAdmin's generated config files are left out)
-  3. builds Varsha-Setup\\Setup.exe (tools\\installer, C# compiler that ships with Windows)
+  3. builds setup\\Setup.exe (tools\\installer, C# compiler that ships with Windows)
   4. runs  Setup.exe /quiet /noshortcuts  to install into the target, then checks the new exe
 
-Varsha-Setup\\ is self-contained: after formatting the PC, run Varsha-Setup\\Setup.exe and it sets
+setup\\ is self-contained: after formatting the PC, run setup\\Setup.exe and it sets
 up C:\\Varsha again with nothing else installed. Setup never touches config\\, data\\ or www\\.
 """
 
@@ -29,7 +29,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = Path(r"C:\Varsha")
 DIST = REPO / "build" / "dist" / "Varsha"
-SETUP = REPO / "Varsha-Setup"
+SETUP = REPO / "setup"
 PAYLOAD = SETUP / "payload"
 # Written by varsha's config engine at runtime; each install keeps its own.
 BIN_SKIP = {("phpmyadmin", "config.inc.php"), ("phpmyadmin", "config.footer.inc.php")}
@@ -146,7 +146,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--target", type=Path, default=DEFAULT_TARGET)
     parser.add_argument("--skip-build", action="store_true", help="reuse build\\dist\\Varsha")
-    parser.add_argument("--no-install", action="store_true", help="only refresh Varsha-Setup")
+    parser.add_argument("--no-install", action="store_true", help="only refresh setup")
     args = parser.parse_args()
     target: Path = args.target.resolve()
     if target == REPO or target.is_relative_to(REPO):
