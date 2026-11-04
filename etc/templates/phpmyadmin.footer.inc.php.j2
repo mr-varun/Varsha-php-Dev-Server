@@ -40,8 +40,16 @@ unset($s);
   html.vx #page_content { display:none !important; }
   .vx-hidden { display:none !important; }
 
-  .vx-shell { display:grid; grid-template-columns:minmax(300px, 400px) 1fr; min-height:100vh; text-align:left; }
-  @media (max-width: 860px) { .vx-shell { grid-template-columns:1fr; } .vx-side { min-height:0 !important; } }
+  /* three columns: tips | login (centered) | servers */
+  .vx-shell { display:grid; grid-template-columns:minmax(260px, 340px) 1fr minmax(320px, 420px); min-height:100vh; text-align:left; }
+  @media (max-width: 1180px) {
+    .vx-shell { grid-template-columns:1fr minmax(300px, 380px); }
+    .vx-side { display:none !important; }
+  }
+  @media (max-width: 760px) {
+    .vx-shell { grid-template-columns:1fr; }
+    .vx-right { height:auto !important; position:static !important; border-left:0 !important; border-top:3px solid var(--vx-edge); }
+  }
 
   /* left: brand panel */
   .vx-side { background:var(--vx-blue); color:#fff; border-right:3px solid var(--vx-edge); padding:40px 34px;
@@ -61,19 +69,31 @@ unset($s);
   .vx-side .vx-back:hover { transform:translate(-2px,-2px); box-shadow:6px 6px 0 #121212; color:#121212; }
 
   /* right: servers + form */
-  .vx-main { padding:44px 36px 56px; max-width:1180px; width:100%; }
-  .vx-main h2 { font-family:var(--vx-font); font-size:24px; margin:0 0 6px; font-weight:800; color:var(--vx-text); }
+  /* center: the login form */
+  .vx-main { display:flex; align-items:center; justify-content:center; padding:40px 28px; min-width:0; }
+  .vx-center { width:100%; max-width:440px; }
+  #loginform .vx-main h2, #loginform .vx-right h2 { text-align:left; font-family:var(--vx-font); font-size:26px; margin:0 0 6px; font-weight:800; color:var(--vx-text); }
   .vx-lead { margin:0 0 20px; color:var(--vx-muted); }
+
+  /* right: server cards, scrolls on its own when there are many remote servers */
+  .vx-right { background:var(--vx-card); border-left:3px solid var(--vx-edge); padding:32px 22px; height:100vh;
+    position:sticky; top:0; overflow-y:auto; }
+  .vx-right .vx-lead { font-size:13.5px; margin-bottom:18px; }
   .vx-group-title { font-family:var(--vx-mono); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px;
     color:var(--vx-muted); margin:0 0 10px; display:flex; align-items:center; gap:8px; }
   .vx-group-title span { background:var(--vx-text); color:var(--vx-yellow); border-radius:5px; padding:0 6px; }
   /* small cards that fill the width: more remote servers just add cards */
-  .vx-servers { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:14px; margin-bottom:26px; }
-  .vx-srv { display:flex; flex-direction:column; gap:8px; background:var(--vx-card); border:3px solid var(--vx-edge);
+  .vx-servers { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; margin-bottom:24px; }
+  .vx-srv { display:flex; flex-direction:column; gap:6px; background:var(--vx-paper); border:3px solid var(--vx-edge);
     border-radius:10px; box-shadow:var(--vx-shadow-sm); padding:12px; cursor:pointer; transition:transform .08s, box-shadow .08s; min-width:0; }
   .vx-srv-top { display:flex; align-items:center; gap:8px; min-width:0; }
   .vx-srv .vx-btn { align-self:stretch; text-align:center; margin-top:auto; padding:6px 10px; }
-  .vx-main .vx-form, .vx-main .vx-alerts, .vx-main .vx-lang { max-width:520px; }
+  .vx-center-logo { display:none; }
+  @media (max-width: 1180px) {
+    .vx-center-logo { display:grid; width:52px; height:52px; border:3px solid #121212; border-radius:14px; background:var(--vx-blue);
+      box-shadow:4px 4px 0 var(--vx-edge); place-items:center; transform:rotate(-4deg); margin-bottom:18px; }
+    .vx-center-logo svg { width:28px; height:28px; }
+  }
   .vx-srv:hover { transform:translate(-2px,-2px); box-shadow:var(--vx-shadow); }
   .vx-srv.picked { background:var(--vx-yellow); color:#121212; }
   .vx-srv.picked .vx-meta { color:#3b392f; }
@@ -81,7 +101,9 @@ unset($s);
   .vx-srv.down:hover { transform:none; box-shadow:var(--vx-shadow-xs); }
   .vx-dot { width:14px; height:14px; border-radius:50%; border:2px solid currentColor; background:var(--vx-grey); flex:none; }
   .vx-dot.up { background:var(--vx-mint); }
-  .vx-name { font-weight:700; font-size:15px; line-height:1.2; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vx-name { font-weight:700; font-size:15px; line-height:1.2; min-width:0; overflow-wrap:anywhere; }
+  .vx-srv-top { align-items:flex-start !important; }
+  .vx-srv-top .vx-dot { margin-top:2px; }
   .vx-meta { display:block; font-family:var(--vx-mono); font-size:11.5px; color:var(--vx-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .vx-btn { font-family:var(--vx-font); font-weight:700; font-size:14px; border:3px solid #121212; border-radius:7px; padding:7px 14px;
     background:var(--vx-blue); color:#fff; box-shadow:3px 3px 0 #121212; cursor:pointer; text-decoration:none; white-space:nowrap; }
@@ -132,7 +154,19 @@ unset($s);
       <a class="vx-back" href="/">← localhost</a>
     </aside>
     <main class="vx-main">
-      <h2>Pick a server</h2>
+      <div class="vx-center">
+        <div class="vx-center-logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32"><path d="M6 7 L16 26 L26 7" fill="none" stroke="#ffd23f" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/></svg>
+        </div>
+        <h2>Log in</h2>
+        <p class="vx-lead">Choose a server on the right, or type a user and password.</p>
+        <div class="vx-alerts"></div>
+        <div class="vx-form"></div>
+        <div class="vx-lang"></div>
+      </div>
+    </main>
+    <aside class="vx-right">
+      <h2>Servers</h2>
       <p class="vx-lead">Green means it's running. Start stopped ones from the varsha panel.</p>
       <div class="vx-groups">
       <?php
@@ -164,10 +198,7 @@ unset($s);
         </div>
       <?php endforeach; ?>
       </div>
-      <div class="vx-alerts"></div>
-      <div class="vx-form"></div>
-      <div class="vx-lang"></div>
-    </main>
+    </aside>
   </div>
 </template>
 <script>
@@ -205,7 +236,7 @@ unset($s);
   var body = form.querySelector('.card-body') || form;
   var title = document.createElement('p');
   title.className = 'vx-form-title';
-  title.textContent = 'Or sign in with a user';
+  title.textContent = 'Sign in';
   var target = document.createElement('p');
   target.className = 'vx-target';
   body.insertBefore(target, body.firstChild);
