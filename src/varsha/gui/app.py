@@ -162,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     manager.adopt_running()
     manager.start_monitor()
     panel.mail_watch.start()
+    panel.scheduler.start()
     sites.start_watching()
     panel.run_task("Autostart", manager.start_autostart)
     if not args.no_browser:

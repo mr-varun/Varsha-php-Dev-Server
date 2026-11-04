@@ -49,7 +49,8 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '
 MAIL_CSP = ("default-src 'none'; img-src data:{remote}; style-src 'unsafe-inline'{remote}; font-src data:{remote}; "
             "frame-ancestors 'self'; form-action 'none'; sandbox allow-popups allow-popups-to-escape-sandbox")
 MAX_UPLOAD = 4 * 1024 * 1024 * 1024
-SERVICE_ACTIONS = {"start", "stop", "restart", "backup", "password", "heidisql", "restore"}
+SERVICE_ACTIONS = {"start", "stop", "restart", "backup", "password", "heidisql", "restore",
+                   "autobackup", "autobackup-run"}
 
 
 class PanelServer(ThreadingHTTPServer):
@@ -178,6 +179,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.read_log(m.group(1), offset)))
         elif m := re.fullmatch(r"/api/services/([a-z0-9._-]+)/backups", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.backups(m.group(1))))
+        elif m := re.fullmatch(r"/api/services/([a-z0-9._-]+)/databases", parts.path):
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
         elif parts.path.startswith("/api/mail/"):
@@ -322,6 +325,13 @@ class PanelHandler(BaseHTTPRequestHandler):
             elif action == "heidisql":
                 app.open_heidisql(sid)
                 self._json(HTTPStatus.OK, {"ok": True})
+            elif action == "autobackup":
+                plan = app.scheduler.set_backup_plan(sid, body)
+                app.events.publish("state")
+                self._json(HTTPStatus.OK, {"describe": plan.describe()})
+            elif action == "autobackup-run":
+                app.run_backup_now(sid)
+                self._json(HTTPStatus.ACCEPTED, {"ok": True})
         elif path in ("/api/all/start", "/api/all/stop"):
             verb = path.rsplit("/", 1)[1]
             task(f"{verb.capitalize()} all", mgr.start_all if verb == "start" else mgr.stop_all)

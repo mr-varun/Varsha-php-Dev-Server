@@ -26,6 +26,7 @@ from varsha.devtools import DevTools
 from varsha.errors import ConfigError, ServiceError, VarshaError
 from varsha.mail.mailpit import MailpitClient, MailWatcher
 from varsha.paths import AppPaths
+from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
 from varsha.services.manager import ServiceManager
@@ -93,6 +94,8 @@ class PanelApp:
         self.mail = MailpitClient(manager)
         # Counter changes and newly arrived mail go out as "mail" events (badge, list, tray balloon).
         self.mail_watch = MailWatcher(self.mail, lambda data: self.events.publish("mail", data))
+        self.scheduler = Scheduler(manager, self.databases, paths.config / "schedule.json",
+                                   paths.data / "schedule-state.json", notify=self._job_done)
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -131,7 +134,18 @@ class PanelApp:
         self._pool.submit(work)
         return task_id
 
+    def _job_done(self, ok: bool, title: str, message: str, service_id: str) -> None:
+        """A scheduled job finished: a toast in the panel (failures also become tray balloons)."""
+        self.events.publish("toast", {"ok": ok, "title": title, "message": message, "service": "" if ok else service_id})
+        self.events.publish("state")
+
+    def run_backup_now(self, service_id: str) -> None:
+        self.manager.definition(service_id)  # unknown id -> KeyError -> 400
+        self.events.publish("state")
+        self._pool.submit(self.scheduler.run_now, service_id)
+
     def shutdown(self) -> None:
+        self.scheduler.stop()
         self.mail_watch.stop()
         self.events.close()
         self._pool.shutdown(wait=False, cancel_futures=True)
@@ -170,6 +184,8 @@ class PanelApp:
                 "dns_route": self.dns_route_active(),
             },
             "busy": busy,
+            "schedule_error": self.scheduler.load_error,
+            "backup_root": str(self.databases.backup_root),
             "mail": {"available": self.mail.available, "service": self.mail.service_id,
                      "smtp_port": self.mail.smtp_port, "ui": self.mail.base_url, **self.mail_watch.snapshot},
         }
@@ -190,6 +206,7 @@ class PanelApp:
             "links": links, "pma_server": self.engine.phpmyadmin_server_index(status.id) if status.is_database else None,
             "can_reset_password": bool(defn.password_reset_sql),
             "has_password": bool(self.manager.credentials.get(status.id)) if status.is_database else False,
+            "autobackup": self.scheduler.backup_status(status.id) if status.is_database else None,
         }
 
     def _site_json(self, info: Any) -> dict[str, Any]:
@@ -305,7 +322,7 @@ class PanelApp:
         if what in folders:
             target = folders[what]
         elif what == "backups":
-            target = self.databases.backup_dir(self.manager.definition(ref).id)
+            target = self.databases.backup_dir(self.manager.definition(ref).id) if ref else self.databases.backup_root
         elif what == "data":
             defn = self.manager.definition(ref)
             if not defn.data_dir:

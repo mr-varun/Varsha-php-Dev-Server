@@ -38,6 +38,9 @@ class Settings:
     phpmyadmin_extra_servers: tuple[ExtraDbServer, ...] = DEFAULT_EXTRA_SERVERS
     tld: str = "test"  # sites are <folder>.<tld>; never "dev" (a real TLD that forces HTTPS)
     panel_port: int = 7700  # the browser control panel, on 127.0.0.1 only
+    # Where database backups go (one subfolder per server). Empty: <root>/data/backups.
+    # The one setting that may be absolute, e.g. "D:\\Varsha-Backups", so backups survive a reinstall.
+    backup_dir: str = ""
     # Not in settings.json (yet): tuning knobs, overridden by tests.
     stable_after: float = 60.0  # a service running this long gets its crash counter reset
     restart_delay: float = 1.0
@@ -97,6 +100,14 @@ def load_settings(path: Path) -> Settings:
         if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
             raise ConfigError('settings.json: "panel_port" must be a number from 1024 to 65535')
         settings = replace(settings, panel_port=port)
+    if "backup_dir" in raw:
+        value = raw["backup_dir"]
+        if not isinstance(value, str):
+            raise ConfigError('settings.json: "backup_dir" must be a folder path (text), e.g. "D:\\\\Varsha-Backups"')
+        value = value.strip()
+        if value and ".." in Path(value).parts:
+            raise ConfigError('settings.json: "backup_dir" must not contain ".."')
+        settings = replace(settings, backup_dir=value)
     if "phpmyadmin_extra_servers" in raw:
         settings = replace(settings, phpmyadmin_extra_servers=_extra_servers(raw["phpmyadmin_extra_servers"]))
     return settings

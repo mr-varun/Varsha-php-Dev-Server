@@ -365,7 +365,75 @@ function dbCard(s) {
         <button class="btn" data-act="password" data-id="${esc(s.id)}" ${s.can_reset_password && !BUSY.has(s.state) ? "" : "disabled"}>Set root password\u2026</button>
         <button class="btn" data-act="open" data-what="backups" data-ref="${esc(s.id)}">Backups folder</button>
       </div>
+      ${autoBackupStrip(s)}
     </article>`;
+}
+
+const fmtWhen = (t) => {
+  if (!t) return "";
+  const d = new Date(t * 1000), days = Math.floor((d - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return days === 0 ? `today ${time}` : days === 1 ? `tomorrow ${time}` : days === -1 ? `yesterday ${time}`
+    : d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + ` ${time}`;
+};
+
+function autoBackupStrip(s) {
+  const a = s.autobackup;
+  if (!a) return "";
+  let status;
+  if (a.running) status = "⏳ backing up now…";
+  else if (!a.enabled) status = "Off. Turn it on so you never lose work.";
+  else if (a.waiting) status = `Due now: runs as soon as ${esc(s.name)} is running`;
+  else status = `Next: ${esc(fmtWhen(a.next_due))}`;
+  const last = a.last_run ? `<span class="${a.last_ok ? "" : "ab-bad"}">Last: ${a.last_ok ? "✔" : "✖"} ${esc(fmtWhen(a.last_run))} · ${esc(a.message)}</span>` : "";
+  return `<div class="auto-backup${a.enabled ? " on" : ""}${a.last_ok === false ? " failed" : ""}">
+      <div class="ab-head"><b>⏱ Auto backup</b><span class="chip ${a.enabled ? "chip-mint" : ""}">${esc(a.describe)}</span></div>
+      <div class="ab-status">${status}</div>${last ? `<div class="ab-last">${last}</div>` : ""}
+      <div class="row">
+        <button class="btn btn-sm btn-ink" data-act="autobackup" data-id="${esc(s.id)}">Schedule…</button>
+        ${a.enabled ? `<button class="btn btn-sm" data-act="autobackup-run" data-id="${esc(s.id)}" ${s.state === "running" && !a.running ? "" : "disabled"}>Run now</button>` : ""}
+      </div>
+    </div>`;
+}
+
+async function autoBackupDialog(s) {
+  const a = s.autobackup;
+  const opts = (pairs, current) => pairs.map(([v, l]) => `<option value="${v}" ${String(v) === String(current) ? "selected" : ""}>${l}</option>`).join("");
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  dialog(`<h2>Auto backup · ${esc(s.name)}</h2>
+    <p>Backups go to <code>${esc(S.backup_root)}\\${esc(s.id)}</code>. Only automatic backups are cleaned up; your manual ones are kept.
+      A backup missed while varsha or the database was off runs as soon as the database is running again.</p>
+    <label class="check"><input type="checkbox" name="enabled" ${a.enabled ? "checked" : ""}> Back up automatically</label>
+    <div class="form-row">
+      <label>How often<select class="input" name="every">${opts([["hourly", "Every hour"], ["6h", "Every 6 hours"], ["12h", "Every 12 hours"], ["daily", "Every day"], ["weekly", "Every week"]], a.every)}</select></label>
+      <label>At (daily / weekly)<input class="input" type="time" name="at" value="${esc(a.at)}"></label>
+      <label>Day (weekly)<select class="input" name="day">${opts(days.map((d, i) => [i, d]), a.day)}</select></label>
+    </div>
+    <label>Keep the newest automatic backups (older ones are deleted)<input class="input" type="number" name="keep" min="1" max="365" value="${esc(a.keep)}"></label>
+    <fieldset class="ab-dbs"><legend>Databases</legend><div id="ab-dbs"><p class="muted">Loading…</p></div></fieldset>
+    <div class="form-error"></div>
+    <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn btn-ink" value="ok">Save</button></div>`,
+  async (data) => {
+    const keep = parseInt(data.get("keep"), 10);
+    if (!(keep >= 1 && keep <= 365)) throw new Error("Keep must be a number from 1 to 365.");
+    const chosen = data.get("scope") === "some" ? data.getAll("db") : [];
+    if (data.get("scope") === "some" && !chosen.length) throw new Error("Tick at least one database, or choose all.");
+    await api.post(`/api/services/${s.id}/autobackup`, {
+      enabled: data.has("enabled"), every: data.get("every"), at: data.get("at") || "13:00",
+      day: parseInt(data.get("day"), 10), keep, databases: chosen });
+    toast({ ok: true, title: `Auto backup of ${s.name}`, message: data.has("enabled") ? "Schedule saved" : "Turned off" });
+  });
+  const box = $("#ab-dbs");
+  let names = [];
+  if (s.state === "running") {
+    try { names = await api.get(`/api/services/${s.id}/databases`); } catch { /* shown below */ }
+  }
+  names = [...new Set([...names, ...a.databases])].sort();
+  const some = a.databases.length > 0;
+  box.innerHTML = `<label class="check"><input type="radio" name="scope" value="all" ${some ? "" : "checked"}> All databases (including new ones)</label>
+    <label class="check"><input type="radio" name="scope" value="some" ${some ? "checked" : ""} ${names.length ? "" : "disabled"}> Only these:</label>
+    <div class="ab-db-list">${names.map((n) => `<label class="check"><input type="checkbox" name="db" value="${esc(n)}" ${a.databases.includes(n) ? "checked" : ""}> ${esc(n)}</label>`).join("")
+      || `<p class="muted">Start ${esc(s.name)} to pick single databases.</p>`}</div>`;
 }
 
 function remoteSection() {
@@ -807,7 +875,7 @@ async function restoreDialog(s) {
   let backups = [];
   try { backups = await api.get(`/api/services/${s.id}/backups`); } catch { /* none */ }
   const items = backups.map((b, i) => `<label class="backup-item"><input type="radio" name="file" value="${esc(b.name)}" ${i === 0 ? "checked" : ""}>
-      <span class="grow mono">${esc(b.name)}</span><span class="muted">${fmtBytes(b.size)} \u00b7 ${esc(fmtDate(b.modified))}</span></label>`).join("");
+      <span class="grow mono">${esc(b.name)}${b.name.startsWith("auto_") ? ' <span class="chip chip-mint">auto</span>' : ""}</span><span class="muted">${fmtBytes(b.size)} \u00b7 ${esc(fmtDate(b.modified))}</span></label>`).join("");
   dialog(`<h2>Restore into ${esc(s.name)}</h2>
     <p>Databases in the file <b>replace</b> databases with the same names.</p>
     ${backups.length ? `<div class="backup-list">${items}</div>` : `<p class="muted">No backups yet for this server.</p>`}
@@ -995,6 +1063,8 @@ document.addEventListener("click", async (event) => {
     case "backup": await act(`/api/services/${id}/backup`); break;
     case "restore": restoreDialog(svc(id)); return;
     case "password": passwordDialog(svc(id)); return;
+    case "autobackup": autoBackupDialog(svc(id)); return;
+    case "autobackup-run": await act(`/api/services/${id}/autobackup-run`); return;
     case "unshare": await act(`/api/tunnels/${id}/stop`); break;
     case "share-site": go("share"); $("#share-target").value = ref; $("#share-target").focus(); return;
     case "remote-add": remoteDialog(null); return;
