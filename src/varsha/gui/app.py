@@ -128,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
                 last = seq
                 if kind == "toast" and isinstance(data, dict) and not data.get("ok"):
                     main_thread.notify.emit(str(data.get("title", "varsha")), str(data.get("message", "")), True)
+                elif kind == "mail" and isinstance(data, dict) and data.get("new"):
+                    new = data["new"]
+                    sender = new[0]["from"]["name"] or new[0]["from"]["address"]
+                    if len(new) == 1:
+                        main_thread.notify.emit(f"New mail: {new[0]['subject'] or '(no subject)'}", f"From {sender}", False)
+                    else:
+                        main_thread.notify.emit(f"{len(new)} new emails", f"Latest from {sender}. Open the Mail page to read them.", False)
 
     main_thread.notify.connect(tray.notify)
     threading.Thread(target=on_event_toast, name="tray-toasts", daemon=True).start()
@@ -154,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
 
     manager.adopt_running()
     manager.start_monitor()
+    panel.mail_watch.start()
     sites.start_watching()
     panel.run_task("Autostart", manager.start_autostart)
     if not args.no_browser:

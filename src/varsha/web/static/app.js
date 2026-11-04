@@ -8,6 +8,7 @@ const VIEWS = {
   stack: { title: "Stack", eyebrow: "home" },
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
+  mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   share: { title: "Share", eyebrow: "cloudflare tunnel" },
   logs: { title: "Logs", eyebrow: "live output" },
   system: { title: "System", eyebrow: "php \u00b7 https \u00b7 dns \u00b7 folders" },
@@ -159,7 +160,7 @@ function renderShell() {
   document.querySelectorAll(".nav-item").forEach((b) => {
     if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     b.querySelector(".nav-badge")?.remove();
-    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length }[b.dataset.view];
+    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length, mail: S.mail.unread }[b.dataset.view];
     if (n) b.insertAdjacentHTML("beforeend", `<span class="nav-badge">${n}</span>`);
   });
   $("#page-head").hidden = view === "stack";
@@ -212,6 +213,11 @@ function homeSkeleton() {
       <section class="tile t-system" aria-labelledby="h-sys">
         <div class="tile-head"><h2 class="tile-title" id="h-sys">PHP &amp; system</h2><button class="tile-link" data-act="goto" data-view="system">Details \u2192</button></div>
         <div class="sys-rows" id="home-system"></div>
+      </section>
+      <section class="tile t-mail" aria-labelledby="h-mail">
+        <div class="tile-head"><h2 class="tile-title" id="h-mail">Mail</h2>
+          <div class="row"><span id="home-mail-count"></span><button class="tile-link" data-act="goto" data-view="mail">Inbox \u2192</button></div></div>
+        <div id="home-mail"></div>
       </section>
     </div>`;
 }
@@ -277,6 +283,7 @@ function fillHome() {
   const current = select.value;
   select.innerHTML = logSourceList().map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join("");
   select.value = current;
+  fillHomeMail();
 }
 
 // ---------------------------------------------------------------- sites view
@@ -480,6 +487,226 @@ function viewSystem() {
     </div>`;
 }
 
+// ---------------------------------------------------------------- mail view
+// The inbox lives in MAIL, not in /api/state: the view is built once and updated in place, so the
+// search box, the scroll position and the open email survive state refreshes and new-mail events.
+
+const MAIL = { list: [], total: 0, count: 0, q: "", selected: null, detail: null, tab: "html",
+               remote: false, headers: null, error: "", running: null, home: [], homeKey: "" };
+const MAIL_PAGE = 50;
+
+const mailState = () => S.mail || { available: false, running: false, unread: 0, total: 0 };
+const mailSvc = () => (S.mail && S.mail.service ? svc(S.mail.service) : null);
+const who = (a) => (a && (a.name || a.address)) || "(unknown sender)";
+const whoFull = (a) => (a.name ? `${a.name} <${a.address}>` : a.address);
+const mailUrl = (id, rest = "") => `/api/mail/message/${encodeURIComponent(id)}${rest}`;
+
+function mailTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+  if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+}
+
+function mailBanner() {
+  const m = mailState();
+  if (!m.available) {
+    return `<div class="banner banner-coral"><p><b>No mail service.</b> Add Mailpit to <code>config\\services.json</code> (a service with <code>"type": "mail"</code>).</p></div>`;
+  }
+  if (m.running) return "";
+  const s = mailSvc();
+  return `<div class="banner banner-blue"><p><b>Mailpit is stopped.</b> Start it to catch the mail your PHP apps send to <code>127.0.0.1:${esc(m.smtp_port)}</code>.</p>
+    ${s ? `<button class="btn btn-mint" data-act="start" data-id="${esc(s.id)}" ${BUSY.has(s.state) ? "disabled" : ""}>▶ Start Mailpit</button>` : ""}</div>`;
+}
+
+function viewMailSkeleton() {
+  return `<div class="mail" id="mail">
+      <div id="mail-banner">${mailBanner()}</div>
+      <div class="mail-panes">
+        <section class="mail-pane mail-list-pane" aria-label="Inbox">
+          <form class="mail-search" data-form="mail-search" role="search">
+            <input class="input" id="mail-q" name="q" value="${esc(MAIL.q)}" autocomplete="off" spellcheck="false"
+              placeholder="Search: words, from:, to:, subject:, is:unread, has:attachment" aria-label="Search mail">
+            <button class="btn" type="submit">Search</button>
+          </form>
+          <div class="mail-tools">
+            <span class="muted grow" id="mail-count"></span>
+            <button class="btn btn-sm" data-act="mail-refresh" title="Reload the list" aria-label="Reload">↻</button>
+            <button class="btn btn-sm" data-act="mail-read-all">Mark all read</button>
+            <button class="btn btn-sm btn-coral" data-act="mail-delete-all">Delete all</button>
+          </div>
+          <div class="mail-list" id="mail-list"></div>
+        </section>
+        <section class="mail-pane mail-reader" id="mail-reader" aria-live="polite"></section>
+      </div>
+    </div>`;
+}
+
+function renderMailList() {
+  const list = $("#mail-list");
+  if (!list) return;
+  const m = mailState();
+  $("#mail-count").textContent = !m.running ? "" : MAIL.q ? `${plural(MAIL.count, "match")} for “${MAIL.q}”`
+    : `${plural(MAIL.total, "email")} · ${m.unread} unread`;
+  if (MAIL.error) { list.innerHTML = `<div class="mail-empty"><b>Couldn't load mail</b><p>${esc(MAIL.error)}</p></div>`; return; }
+  if (!MAIL.list.length) {
+    list.innerHTML = !m.running ? `<div class="mail-empty"><b>Mailpit is stopped</b><p>Start it and mail shows up here.</p></div>`
+      : MAIL.q ? `<div class="mail-empty"><b>Nothing matches</b><p>Try fewer words, or <code>from:</code> / <code>subject:</code>.</p></div>`
+      : `<div class="mail-empty"><b>No mail yet</b><p>PHP's <code>mail()</code> and any SMTP library pointed at <code>127.0.0.1:${esc(m.smtp_port)}</code>
+         land here. Nothing ever leaves this PC.</p></div>`;
+    return;
+  }
+  const more = MAIL.list.length < (MAIL.q ? MAIL.count : MAIL.total);
+  list.innerHTML = MAIL.list.map((x) => `<button class="mail-item${x.read ? "" : " unread"}${x.id === MAIL.selected ? " selected" : ""}" data-act="mail-open" data-id="${esc(x.id)}">
+      <span class="mail-dot" aria-hidden="true"></span>
+      <span class="mail-from">${esc(who(x.from))}</span>
+      <span class="mail-time" title="${esc(new Date(x.created).toLocaleString())}">${esc(mailTime(x.created))}</span>
+      <span class="mail-subject">${x.attachments ? '<span class="mail-clip" title="Has attachments">📎</span>' : ""}${esc(x.subject || "(no subject)")}</span>
+      <span class="mail-snippet">${esc(x.snippet)}</span>
+    </button>`).join("") + (more ? `<button class="btn btn-sm mail-more" data-act="mail-more">Load more</button>` : "");
+}
+
+async function loadMail(append = false) {
+  if (!mailState().running) {
+    Object.assign(MAIL, { list: [], total: 0, count: 0, error: "" });
+    renderMailList();
+    return;
+  }
+  try {
+    const start = append ? MAIL.list.length : 0;
+    const limit = append ? MAIL_PAGE : Math.max(MAIL_PAGE, MAIL.list.length);
+    const data = await api.get(`/api/mail/messages?start=${start}&limit=${limit}&q=${encodeURIComponent(MAIL.q)}`);
+    MAIL.list = append ? MAIL.list.concat(data.messages) : data.messages;
+    Object.assign(MAIL, { total: data.total, count: data.count, error: "" });
+  } catch (err) {
+    MAIL.error = err.message;
+  }
+  renderMailList();
+}
+
+async function openMail(id) {
+  Object.assign(MAIL, { selected: id, headers: null, remote: false });
+  renderMailList();
+  const box = $("#mail-reader");
+  if (box) box.innerHTML = `<div class="mail-empty"><p>Loading…</p></div>`;
+  try {
+    MAIL.detail = await api.get(mailUrl(id));
+    MAIL.tab = MAIL.detail.has_html ? "html" : "text";
+    const item = MAIL.list.find((x) => x.id === id);
+    if (item) item.read = true;
+  } catch (err) {
+    MAIL.detail = null;
+    if (box) box.innerHTML = `<div class="mail-empty"><b>Couldn't open it</b><p>${esc(err.message)}</p></div>`;
+    return;
+  }
+  renderMailList();
+  renderReader();
+}
+
+function renderReader() {
+  const box = $("#mail-reader");
+  if (!box) return;
+  const d = MAIL.detail;
+  if (!d || d.id !== MAIL.selected) {
+    box.innerHTML = `<div class="mail-empty"><b>Pick an email</b><p>HTML is shown in a locked-down frame: no scripts run,
+      and remote images (trackers) load only if you allow them.</p></div>`;
+    return;
+  }
+  const people = (label, list) => (list.length ? `<dt>${label}</dt><dd>${list.map((a) => esc(whoFull(a))).join(", ")}</dd>` : "");
+  const tabs = [["html", "HTML", d.has_html], ["text", "Text", true], ["headers", "Headers", true]]
+    .map(([key, label, ok]) => `<button class="mail-tab" data-act="mail-tab" data-tab="${key}" aria-pressed="${MAIL.tab === key}" ${ok ? "" : "disabled"}>${label}</button>`).join("");
+  let body;
+  if (MAIL.tab === "html" && d.has_html) {
+    body = `<iframe class="mail-frame" title="Email content" sandbox="allow-popups allow-popups-to-escape-sandbox"
+      referrerpolicy="no-referrer" src="${mailUrl(d.id, "/html")}${MAIL.remote ? "?remote=1" : ""}"></iframe>`;
+  } else if (MAIL.tab === "headers") {
+    body = MAIL.headers ? `<dl class="kv mail-headers">${Object.entries(MAIL.headers)
+      .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v.map(esc).join("<br>")}</dd>`).join("")}</dl>` : `<p class="muted">Loading…</p>`;
+  } else {
+    body = `<pre class="mail-text">${esc(d.text || "(this email has no plain-text part)")}</pre>`;
+  }
+  box.innerHTML = `<div class="mail-head">
+      <h2 class="mail-title">${esc(d.subject || "(no subject)")}</h2>
+      <div class="row">
+        <button class="btn btn-sm" data-act="mail-unread" data-id="${esc(d.id)}">Mark unread</button>
+        <a class="btn btn-sm" href="${mailUrl(d.id, "/raw")}" download>Download .eml</a>
+        <button class="btn btn-sm btn-coral" data-act="mail-delete" data-id="${esc(d.id)}">Delete</button>
+      </div>
+    </div>
+    <dl class="kv mail-meta"><dt>From</dt><dd>${esc(whoFull(d.from))}</dd>${people("To", d.to)}${people("Cc", d.cc)}${people("Bcc", d.bcc)}${people("Reply-To", d.reply_to)}
+      <dt>Date</dt><dd>${esc(new Date(d.date).toLocaleString())}</dd><dt>Size</dt><dd>${fmtBytes(d.size)}${d.inline ? ` · ${plural(d.inline, "inline image")}` : ""}</dd></dl>
+    ${d.attachments.length ? `<div class="row mail-files">${d.attachments.map((a) => `<a class="chip" href="${mailUrl(d.id, `/part/${encodeURIComponent(a.part)}`)}" download
+        title="${esc(a.type)}">📎 ${esc(a.name)} <span class="muted">${fmtBytes(a.size)}</span></a>`).join("")}</div>` : ""}
+    <div class="row mail-tabs">${tabs}<span class="grow"></span>
+      ${MAIL.tab === "html" && d.has_html ? `<label class="toggle"><input type="checkbox" id="mail-remote" ${MAIL.remote ? "checked" : ""}> load remote images</label>` : ""}</div>
+    <div class="mail-body">${body}</div>`;
+  if (MAIL.tab === "headers" && !MAIL.headers) loadHeaders(d.id);
+}
+
+async function loadHeaders(id) {
+  try { MAIL.headers = await api.get(mailUrl(id, "/headers")); } catch (err) { MAIL.headers = { Error: [err.message] }; }
+  if (MAIL.selected === id) renderReader();
+}
+
+async function mailPost(path, body) {
+  try { await api.post(path, body); return true; } catch (err) { toast({ ok: false, title: "Mail", message: err.message }); return false; }
+}
+
+function closeMail() {
+  Object.assign(MAIL, { selected: null, detail: null, headers: null });
+  renderReader();
+}
+
+async function fillHomeMail(force = false) {
+  const box = $("#home-mail");
+  if (!box) return;
+  const m = mailState();
+  $("#home-mail-count").innerHTML = m.running ? `<span class="chip ${m.unread ? "chip-yellow" : ""}">${m.unread} unread</span>` : "";
+  if (!m.available) { box.innerHTML = `<p class="muted">No mail service is configured.</p>`; MAIL.homeKey = ""; return; }
+  if (!m.running) {
+    const s = mailSvc();
+    box.innerHTML = `<div class="row"><span class="muted grow">Mailpit is stopped. Start it to catch what PHP sends to 127.0.0.1:${esc(m.smtp_port)}.</span>
+      ${s ? `<button class="btn btn-sm btn-mint" data-act="start" data-id="${esc(s.id)}" ${BUSY.has(s.state) ? "disabled" : ""}>Start Mailpit</button>` : ""}</div>`;
+    MAIL.homeKey = "";
+    return;
+  }
+  const key = `${m.total}:${m.unread}`;
+  if (!force && key === MAIL.homeKey && box.childElementCount) return;
+  MAIL.homeKey = key;
+  try { MAIL.home = (await api.get("/api/mail/messages?limit=4")).messages; } catch { MAIL.home = []; }
+  box.innerHTML = MAIL.home.length ? `<div class="mail-rows">${MAIL.home.map((x) => `<button class="mail-row${x.read ? "" : " unread"}" data-act="mail-home-open" data-id="${esc(x.id)}">
+      <span class="mail-dot" aria-hidden="true"></span><span class="mail-from">${esc(who(x.from))}</span>
+      <span class="mail-time">${esc(mailTime(x.created))}</span><span class="mail-subject">${esc(x.subject || "(no subject)")}</span></button>`).join("")}</div>`
+    : `<p class="muted">No mail yet. Anything PHP sends to <code>127.0.0.1:${esc(m.smtp_port)}</code> shows up here, never on the internet.</p>`;
+}
+
+function mailToast(m) {
+  const el = document.createElement("div");
+  el.className = "toast toast-mail";
+  el.innerHTML = `<div class="toast-title">✉ New mail</div>
+    <div class="toast-msg"><b>${esc(m.subject || "(no subject)")}</b><br>from ${esc(whoFull(m.from))}</div>
+    <div class="row"><button class="btn btn-sm btn-blue" data-act="mail-home-open" data-id="${esc(m.id)}">Open</button>
+    <button class="btn btn-sm btn-ghost" data-act="dismiss">Dismiss</button></div>`;
+  $("#toasts").prepend(el);
+  setTimeout(() => el.remove(), 8000);
+}
+
+function onMailEvent(data) {
+  if (!S) return;
+  S.mail = { ...S.mail, running: data.running, unread: data.unread, total: data.total };
+  renderShell();
+  if (view === "mail" && $("#mail")) {
+    $("#mail-banner").innerHTML = mailBanner();
+    MAIL.running = data.running;
+    loadMail();
+  }
+  if (view === "stack" && $("#bento")) fillHomeMail(true);
+  for (const m of (data.new || []).slice(0, 3)) mailToast(m);
+}
+
 // ---------------------------------------------------------------- render
 
 const RENDER = { sites: viewSites, databases: viewDatabases, share: viewShare, logs: viewLogs, system: viewSystem };
@@ -500,6 +727,14 @@ function render() {
     return;
   }
   logsTail.stop();
+  if (view === "mail") {
+    if (!$("#mail")) { host.innerHTML = viewMailSkeleton(); MAIL.running = mailState().running; renderReader(); loadMail(); }
+    else {
+      $("#mail-banner").innerHTML = mailBanner();
+      if (MAIL.running !== mailState().running) { MAIL.running = mailState().running; loadMail(); }
+    }
+    return;
+  }
   const shareValue = $("#share-target")?.value;
   const focused = document.activeElement?.id;
   host.innerHTML = RENDER[view]();
@@ -785,13 +1020,43 @@ document.addEventListener("click", async (event) => {
     case "php-config": phpDialog(id); return;
     case "ini-add": $("#ini-rows").insertAdjacentHTML("beforeend", iniRow("", "", $("#ini-rows").children.length)); return;
     case "quit": quitDialog(); return;
+    case "mail-open": openMail(id); return;
+    case "mail-home-open": el.closest(".toast")?.remove(); if (view !== "mail") go("mail"); openMail(id); return;
+    case "mail-refresh": loadMail(); return;
+    case "mail-more": loadMail(true); return;
+    case "mail-tab": MAIL.tab = el.dataset.tab; renderReader(); return;
+    case "mail-unread":
+      if (await mailPost("/api/mail/read", { ids: [id], read: false })) {
+        const item = MAIL.list.find((x) => x.id === id);
+        if (item) item.read = false;
+        closeMail(); renderMailList();
+      }
+      return;
+    case "mail-delete":
+      if (await mailPost("/api/mail/delete", { ids: [id] })) {
+        MAIL.list = MAIL.list.filter((x) => x.id !== id);
+        closeMail(); loadMail();
+      }
+      return;
+    case "mail-read-all": if (await mailPost("/api/mail/read", { ids: [], read: true })) loadMail(); return;
+    case "mail-delete-all":
+      confirmDialog("Delete all mail?", `Every email in Mailpit (${plural(MAIL.total || mailState().total, "email")}) is deleted. This can't be undone.`,
+        "Delete all", async () => { await api.post("/api/mail/delete", { all: true }); MAIL.list = []; closeMail(); loadMail(); });
+      return;
     default: return;
   }
   render();
 });
 
 document.addEventListener("submit", (event) => {
-  if (event.target.dataset.form !== "share") return;
+  const kind = event.target.dataset.form;
+  if (kind === "mail-search") {
+    event.preventDefault();
+    MAIL.q = $("#mail-q").value.trim();
+    loadMail();
+    return;
+  }
+  if (kind !== "share") return;
   event.preventDefault();
   const target = event.target.target.value.trim();
   if (target) shareDialog(target);
@@ -799,6 +1064,7 @@ document.addEventListener("submit", (event) => {
 
 document.addEventListener("change", (event) => {
   if (event.target.id === "log-follow") logsTail.follow = event.target.checked;
+  if (event.target.id === "mail-remote") { MAIL.remote = event.target.checked; renderReader(); }
   if (event.target.dataset.sitePhp) act(`/api/sites/${event.target.dataset.sitePhp}/php`, { php: event.target.value });
   if (event.target.name?.startsWith("ext:")) event.target.closest(".ext")?.classList.toggle("on", event.target.checked);
   if (event.target.id === "home-log-src") {
@@ -809,7 +1075,7 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.target.closest("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
-  const index = "123456".indexOf(event.key);
+  const index = "1234567".indexOf(event.key);
   if (index >= 0) go(Object.keys(VIEWS)[index]);
   if (event.key === "Escape" && openMenu) { openMenu = null; render(); }
 });
@@ -820,6 +1086,7 @@ function connect() {
   source.addEventListener("hello", () => { clearTimeout(offlineTimer); $("#offline").hidden = true; refresh(); });
   source.addEventListener("state", scheduleRefresh);
   source.addEventListener("toast", (event) => { toast(JSON.parse(event.data)); scheduleRefresh(); });
+  source.addEventListener("mail", (event) => onMailEvent(JSON.parse(event.data)));
   source.onerror = () => { clearTimeout(offlineTimer); offlineTimer = setTimeout(() => { $("#offline").hidden = false; }, 2500); };
 }
 

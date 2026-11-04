@@ -43,6 +43,11 @@ STATIC_FILES = {
 COOKIE = "varsha_panel"
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+# An email's HTML is untrusted: no scripts, no forms, no network except (on request) remote images,
+# and a sandbox on top. Inline images arrive as data: URIs, so the sandboxed (opaque-origin) frame
+# never needs the panel cookie. It may only be framed by the panel itself.
+MAIL_CSP = ("default-src 'none'; img-src data:{remote}; style-src 'unsafe-inline'{remote}; font-src data:{remote}; "
+            "frame-ancestors 'self'; form-action 'none'; sandbox allow-popups allow-popups-to-escape-sandbox")
 MAX_UPLOAD = 4 * 1024 * 1024 * 1024
 SERVICE_ACTIONS = {"start", "stop", "restart", "backup", "password", "heidisql", "restore"}
 
@@ -96,15 +101,16 @@ class PanelHandler(BaseHTTPRequestHandler):
     def app(self) -> PanelApp:
         return self.server.app
 
-    def _headers(self, status: int, content_type: str, length: int | None, extra: dict[str, str] | None = None) -> None:
+    def _headers(self, status: int, content_type: str, length: int | None, extra: dict[str, str] | None = None,
+                 csp: str = CSP, frame_options: str = "DENY") -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         if length is not None:
             self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("Content-Security-Policy", csp)
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Frame-Options", frame_options)
         self.send_header("Referrer-Policy", "no-referrer")
         for key, value in (extra or {}).items():
             self.send_header(key, value)
@@ -174,8 +180,45 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.backups(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path.startswith("/api/mail/"):
+            self._guarded(lambda: self._mail_get(parts.path, query))
         else:
             self._error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _mail_get(self, path: str, query: dict[str, list[str]]) -> None:
+        mail = self.app.mail
+        arg = lambda name, default="": (query.get(name) or [default])[0]  # noqa: E731
+        if path == "/api/mail/messages":
+            self._json(HTTPStatus.OK, mail.messages(int(arg("start", "0") or 0), int(arg("limit", "50") or 50), arg("q")))
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)", path):
+            data = mail.message(m.group(1))
+            self.app.mail_watch.poll()  # opening marks it read: update the badge right away
+            self._json(HTTPStatus.OK, data)
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/html", path):
+            remote = " https: http:" if arg("remote") == "1" else ""
+            body = mail.html(m.group(1)).encode("utf-8")
+            self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body),
+                          csp=MAIL_CSP.format(remote=remote), frame_options="SAMEORIGIN")
+            self.wfile.write(body)
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/headers", path):
+            self._json(HTTPStatus.OK, mail.headers(m.group(1)))
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/raw", path):
+            body = mail.raw(m.group(1))
+            self._download(body, "message/rfc822", f"{m.group(1)}.eml")
+        elif m := re.fullmatch(r"/api/mail/message/([A-Za-z0-9_-]+)/part/([0-9.]+)", path):
+            body, ctype, name = mail.part(m.group(1), m.group(2))
+            self._download(body, ctype, name)
+        else:
+            self._error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _download(self, body: bytes, content_type: str, filename: str) -> None:
+        """Always a download (attachment), never rendered in the panel's origin."""
+        safe = re.sub(r"[^A-Za-z0-9._ -]+", "_", Path(filename).name).strip(" .")[:120] or "download"
+        if not re.fullmatch(r"[a-z0-9.+-]+/[a-z0-9.+-]+", content_type.split(";")[0].strip().lower()):
+            content_type = "application/octet-stream"
+        self._headers(HTTPStatus.OK, content_type.split(";")[0].strip(), len(body),
+                      {"Content-Disposition": f'attachment; filename="{safe}"'}, csp="default-src 'none'; sandbox")
+        self.wfile.write(body)
 
     def _static(self, path: str) -> None:
         name, content_type = STATIC_FILES[path]
@@ -358,6 +401,23 @@ class PanelHandler(BaseHTTPRequestHandler):
                 return message
 
             task(f"Create {name}.{app.settings.tld}", create, success=lambda msg: msg)
+        elif path == "/api/mail/read":
+            ids = body.get("ids") or []
+            if not isinstance(ids, list):
+                raise ValueError("ids must be a list")
+            app.mail.set_read([str(i) for i in ids], bool(body.get("read", True)))
+            app.mail_watch.poll()
+            self._json(HTTPStatus.OK, {"ok": True})
+        elif path == "/api/mail/delete":
+            if body.get("all") is True:
+                app.mail.delete(None)
+            else:
+                ids = body.get("ids") or []
+                if not isinstance(ids, list) or not ids:
+                    raise ValueError("ids must be a non-empty list (or all: true)")
+                app.mail.delete([str(i) for i in ids])
+            app.mail_watch.poll()
+            self._json(HTTPStatus.OK, {"ok": True})
         elif path == "/api/quit":
             self._json(HTTPStatus.OK, {"ok": True})
             threading.Thread(target=app.quit, args=(bool(body.get("stop_services")),), daemon=True).start()

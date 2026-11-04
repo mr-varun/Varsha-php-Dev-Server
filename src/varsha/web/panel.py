@@ -24,6 +24,7 @@ from varsha import __version__
 from varsha.config_engine.engine import ConfigEngine
 from varsha.devtools import DevTools
 from varsha.errors import ConfigError, ServiceError, VarshaError
+from varsha.mail.mailpit import MailpitClient, MailWatcher
 from varsha.paths import AppPaths
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
@@ -89,6 +90,9 @@ class PanelApp:
         self.remote = remote
         self.tools = DevTools(paths, engine, manager)
         self.events = EventBus()
+        self.mail = MailpitClient(manager)
+        # Counter changes and newly arrived mail go out as "mail" events (badge, list, tray balloon).
+        self.mail_watch = MailWatcher(self.mail, lambda data: self.events.publish("mail", data))
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -128,6 +132,7 @@ class PanelApp:
         return task_id
 
     def shutdown(self) -> None:
+        self.mail_watch.stop()
         self.events.close()
         self._pool.shutdown(wait=False, cancel_futures=True)
 
@@ -165,6 +170,8 @@ class PanelApp:
                 "dns_route": self.dns_route_active(),
             },
             "busy": busy,
+            "mail": {"available": self.mail.available, "service": self.mail.service_id,
+                     "smtp_port": self.mail.smtp_port, "ui": self.mail.base_url, **self.mail_watch.snapshot},
         }
 
     def _service_json(self, status: Any) -> dict[str, Any]:
