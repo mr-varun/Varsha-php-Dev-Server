@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Runtime folders: binaries, generated configs, databases, sites and logs are local to each machine.
+/bin/*
+!/bin/README.txt
+/etc/*
+!/etc/templates/
+/data/
+/www/
+/logs/
+
+# Built and personal files
+/Varsha.exe
+/build/
+/config/remote-databases.json
+/config/sites.json
+/config/php.json

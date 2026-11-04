@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "varsha"
+version = "0.1.0"
+description = "Portable local web development environment for Windows"
+requires-python = ">=3.12"
+# Dependencies are added phase by phase (watchdog/dnslib arrive in Phase 3).
+dependencies = [
+    "PySide6>=6.7",
+    "psutil>=5.9",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.gui-scripts]
+varsha = "varsha.gui.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

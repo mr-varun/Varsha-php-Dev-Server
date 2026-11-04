@@ -1,0 +1,35 @@
+# varsha-generated: {{ site.domain }} from www/{{ site.folder.name }}
+# Regenerated whenever www/ changes; edit etc/templates/vhost.conf.j2 or config/sites.json instead.
+
+{% macro php_block() %}
+{% if php %}
+    # This site runs PHP {{ php.label }} instead of the default.
+    <IfModule fcgid_module>
+        FcgidInitialEnv PHPRC "{{ php.ini_dir }}"
+        FcgidInitialEnv PATH "{{ php.folder }};{{ system_root }}/system32;{{ system_root }}"
+        FcgidInitialEnv SystemRoot "{{ system_root }}"
+        FcgidInitialEnv TEMP "{{ data }}/tmp"
+        FcgidInitialEnv TMP "{{ data }}/tmp"
+        FcgidInitialEnv PHP_FCGI_MAX_REQUESTS 0
+        <FilesMatch "\.php$">
+            FcgidWrapper "{{ php.cgi }}" .php
+        </FilesMatch>
+    </IfModule>
+{% endif %}
+{% endmacro %}
+<VirtualHost *:{{ http_port }}>
+    ServerName {{ site.domain }}
+    ServerAlias {{ site.aliases | join(" ") }}
+    DocumentRoot "{{ docroot }}"
+{{ php_block() }}</VirtualHost>
+{% if cert %}
+
+<VirtualHost *:{{ https_port }}>
+    ServerName {{ site.domain }}
+    ServerAlias {{ site.aliases | join(" ") }}
+    DocumentRoot "{{ docroot }}"
+    SSLEngine on
+    SSLCertificateFile "{{ cert }}"
+    SSLCertificateKeyFile "{{ key }}"
+{{ php_block() }}</VirtualHost>
+{% endif %}

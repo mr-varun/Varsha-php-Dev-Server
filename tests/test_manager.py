@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+import os
+import socket
+from collections.abc import Callable
+
+import psutil
+import pytest
+
+from conftest import fake_def, free_port, wait_for
+from varsha.errors import ServiceError
+from varsha.services.manager import ServiceManager
+from varsha.services.models import ServiceDef, ServiceState, StopMethod, StopSpec
+from varsha.services.ports import listening
+
+MakeManager = Callable[..., ServiceManager]
+
+
+def test_start_and_graceful_stop(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port)])
+    manager.start("svc")
+    status = manager.status("svc")
+    assert status.state is ServiceState.RUNNING
+    assert status.pid and listening([port])
+
+    manager.stop("svc")
+    assert manager.status("svc").state is ServiceState.STOPPED
+    assert not psutil.pid_exists(status.pid) or not psutil.Process(status.pid).is_running()
+    log = status.log_path.read_text(encoding="utf-8", errors="replace")
+    assert "fake service listening" in log
+    assert "fake service stopping" in log  # it exited through the stop command, not a kill
+
+
+def test_listener_sees_transitions(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port)])
+    seen: list[ServiceState] = []
+    manager.set_listener(lambda sid: seen.append(manager.status(sid).state))
+    manager.start("svc")
+    manager.stop("svc")
+    assert seen == [ServiceState.STARTING, ServiceState.RUNNING, ServiceState.STOPPING,
+                    ServiceState.STOPPED]
+
+
+def test_busy_port_blocks_start(make_manager: MakeManager) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen()
+        port = blocker.getsockname()[1]
+        manager = make_manager([fake_def("svc", port)])
+        with pytest.raises(ServiceError, match=f"PID {os.getpid()}") as info:
+            manager.start("svc")
+        assert info.value.service_id == "svc"
+        assert manager.status("svc").state is ServiceState.ERROR
+
+
+def test_exit_during_startup_reports_log_tail(make_manager: MakeManager) -> None:
+    manager = make_manager([fake_def("svc", free_port(), "--exit-immediately", "3")])
+    with pytest.raises(ServiceError, match="exit code 3") as info:
+        manager.start("svc")
+    assert "failing on purpose" in str(info.value)
+    assert manager.status("svc").state is ServiceState.ERROR
+
+
+def test_kill_after_stop_timeout(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port, "--ignore-stop")], stop_timeout=1.0)
+    manager.start("svc")
+    pid = manager.status("svc").pid
+    manager.stop("svc")
+    assert manager.status("svc").state is ServiceState.STOPPED
+    assert wait_for(lambda: not psutil.pid_exists(pid), 5)
+
+
+def test_terminate_method(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port, stop=StopSpec(StopMethod.TERMINATE))])
+    manager.start("svc")
+    manager.stop("svc")
+    assert manager.status("svc").state is ServiceState.STOPPED
+    assert wait_for(lambda: not listening([port]), 5)
+
+
+def test_missing_stop_command_kills_immediately(make_manager: MakeManager) -> None:
+    stop = StopSpec(StopMethod.COMMAND, ("{exe_dir}/does-not-exist.exe",))
+    manager = make_manager([fake_def("svc", free_port(), stop=stop)], stop_timeout=30.0)
+    manager.start("svc")
+    manager.stop("svc")  # would take 30 s if it waited for the timeout
+    assert manager.status("svc").state is ServiceState.STOPPED
+
+
+def test_crash_is_restarted(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port)])
+    manager.start_monitor()
+    manager.start("svc")
+    first_pid = manager.status("svc").pid
+    psutil.Process(first_pid).kill()
+
+    assert wait_for(lambda: (manager.status("svc").state is ServiceState.RUNNING
+                             and manager.status("svc").pid not in (None, first_pid)), 10)
+    assert listening([port])
+
+
+def test_gives_up_after_max_restarts(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port)], max_auto_restarts=2)
+    manager.start_monitor()
+    manager.start("svc")
+    for _attempt in range(3):
+        status = manager.status("svc")
+        assert wait_for(lambda: manager.status("svc").state is ServiceState.RUNNING, 10)
+        pid = manager.status("svc").pid
+        psutil.Process(pid).kill()
+        assert wait_for(lambda: manager.status("svc").pid != pid, 10)
+    assert wait_for(lambda: manager.status("svc").state is ServiceState.ERROR, 10)
+    assert "automatic restarts" in manager.status("svc").message
+    del status
+
+
+def test_user_stop_is_not_a_crash(make_manager: MakeManager) -> None:
+    port = free_port()
+    manager = make_manager([fake_def("svc", port)])
+    manager.start_monitor()
+    manager.start("svc")
+    manager.stop("svc")
+    assert not wait_for(lambda: manager.status("svc").state is not ServiceState.STOPPED, 1.0)
+
+
+def test_start_all_and_stop_all(make_manager: MakeManager) -> None:
+    ports = [free_port(), free_port()]
+    manager = make_manager([fake_def("a", ports[0]), fake_def("b", ports[1])])
+    manager.start_all()
+    assert all(s.state is ServiceState.RUNNING for s in manager.statuses())
+    assert manager.any_running()
+    manager.stop_all()
+    assert all(s.state is ServiceState.STOPPED for s in manager.statuses())
+    assert not manager.any_running()
+
+
+def test_start_all_aggregates_errors(make_manager: MakeManager) -> None:
+    good = fake_def("good", free_port())
+    bad = fake_def("bad", free_port(), "--exit-immediately", "1")
+    manager = make_manager([good, bad])
+    with pytest.raises(ServiceError, match="1 service failed to start"):
+        manager.start_all()
+    assert manager.status("good").state is ServiceState.RUNNING
+
+
+def test_missing_and_disabled_states(app_paths) -> None:  # type: ignore[no-untyped-def]
+    from varsha.settings import Settings
+
+    missing = ServiceDef(id="m", name="M", type="mysql", exe="bin/mysql/mysql-9*/bin/mysqld.exe")
+    disabled = ServiceDef(id="d", name="D", type="mysql", exe="bin/x.exe", enabled=False)
+    builtin = ServiceDef(id="dns", name="DNS", type="builtin")
+    manager = ServiceManager(app_paths, [missing, disabled, builtin], Settings())
+    states = {s.id: s.state for s in manager.statuses()}
+    assert states == {"m": ServiceState.MISSING, "d": ServiceState.DISABLED, "dns": ServiceState.MISSING}
+    assert "bin\\mysql\\mysql-9...\\bin\\mysqld.exe" in manager.status("m").message
+    with pytest.raises(ServiceError, match="not installed"):
+        manager.start("m")
+
+
+def test_missing_config_file_is_explained(make_manager: MakeManager) -> None:
+    defn = fake_def("svc", free_port())
+    defn = ServiceDef(**{**defn.__dict__, "config_file": "etc/svc/svc.conf"})
+    manager = make_manager([defn])
+    with pytest.raises(ServiceError, match="config file etc/svc/svc.conf not found"):
+        manager.start("svc")

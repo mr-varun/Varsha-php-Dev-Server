@@ -1,0 +1,150 @@
+{
+  "_comment": [
+    "All paths are relative to the varsha folder; '*' in exe matches a versioned folder.",
+    "Placeholders: {root} {bin} {etc} {data} {www} {logs} {exe} {exe_dir} {home} {config} {data_dir}",
+    "{port} {ports[N]} {id} {version}; in stop.command also {client_cnf} (a temporary [client] option",
+    "file with the saved root password); in password_reset_sql {password} (already SQL-escaped).",
+    "password_reset_sql is a list: --init-file runs one statement per line.",
+    "{home} is the folder above bin\\ (Apache ServerRoot, MySQL basedir). Paths expand with forward slashes.",
+    "MySQL/MariaDB: --defaults-file / --defaults-extra-file must be the FIRST argument or they are ignored.",
+    "Each database version is its own entry with its own port and data_dir, so they can run side by side.",
+    "init_command runs once, when data_dir is empty. init_stdin entries are fed to it: 'sql:...' literally,",
+    "anything else as a file path."
+  ],
+  "services": [
+    {
+      "id": "apache",
+      "name": "Apache 2.4",
+      "type": "apache",
+      "exe": "bin/apache/*/bin/httpd.exe",
+      "args": ["-d", "{home}", "-f", "{config}"],
+      "ports": [80, 443],
+      "config_template": "httpd.conf.j2",
+      "config_file": "etc/apache/httpd.conf",
+      "log_file": "logs/apache-error.log",
+      "autostart": false,
+      "enabled": true,
+      "stop": {"method": "apache_signal", "also_kill": ["php-cgi.exe"]},
+      "reload": {"method": "apache_signal", "test_command": ["{exe}", "-t", "-d", "{home}", "-f", "{config}"]},
+      "links": [
+        {"label": "Open http://localhost", "url": "http://localhost/"},
+        {"label": "Open phpMyAdmin", "url": "http://localhost/phpmyadmin/"}
+      ]
+    },
+    {
+      "id": "mariadb-11.8",
+      "name": "MariaDB 11.8",
+      "type": "mariadb",
+      "exe": "bin/mariadb/mariadb-11.8*/bin/mariadbd.exe",
+      "args": ["--defaults-file={config}", "--console"],
+      "ports": [3307],
+      "config_template": "my.ini.j2",
+      "config_file": "etc/mariadb-11.8/my.ini",
+      "data_dir": "data/mariadb-11.8",
+      "init_command": ["{exe_dir}/mariadb-install-db.exe", "--datadir={data_dir}", "--port={port}"],
+      "tools": {"client": "{exe_dir}/mariadb.exe", "dump": "{exe_dir}/mariadb-dump.exe"},
+      "password_reset_sql": ["ALTER USER 'root'@'localhost' IDENTIFIED BY '{password}';", "FLUSH PRIVILEGES;"],
+      "autostart": false,
+      "enabled": true,
+      "stop": {
+        "method": "command",
+        "command": ["{exe_dir}/mariadb-admin.exe", "--defaults-extra-file={client_cnf}", "shutdown"]
+      }
+    },
+    {
+      "id": "mysql-8.4",
+      "name": "MySQL 8.4",
+      "type": "mysql",
+      "exe": "bin/mysql/mysql-8.4*/bin/mysqld.exe",
+      "args": ["--defaults-file={config}", "--console"],
+      "ports": [3308],
+      "config_template": "my.ini.j2",
+      "config_file": "etc/mysql-8.4/my.ini",
+      "data_dir": "data/mysql-8.4",
+      "init_command": ["{exe}", "--defaults-file={config}", "--initialize-insecure", "--console"],
+      "tools": {"client": "{exe_dir}/mysql.exe", "dump": "{exe_dir}/mysqldump.exe"},
+      "password_reset_sql": ["ALTER USER 'root'@'localhost' IDENTIFIED BY '{password}';", "FLUSH PRIVILEGES;"],
+      "autostart": false,
+      "enabled": true,
+      "stop": {
+        "method": "command",
+        "command": ["{exe_dir}/mysqladmin.exe", "--defaults-extra-file={client_cnf}", "shutdown"]
+      }
+    },
+    {
+      "id": "mysql-5.6",
+      "name": "MySQL 5.6 (32-bit)",
+      "type": "mysql",
+      "exe": "bin/mysql/mysql-5.6*/bin/mysqld.exe",
+      "args": ["--defaults-file={config}", "--console"],
+      "ports": [3306],
+      "config_template": "my.ini.j2",
+      "config_file": "etc/mysql-5.6/my.ini",
+      "data_dir": "data/mysql-5.6",
+      "_init_note": "5.6 has no --initialize; this is what its mysql_install_db.pl does, via --bootstrap.",
+      "init_command": ["{exe}", "--defaults-file={config}", "--bootstrap", "--console"],
+      "init_stdin": [
+        "sql:CREATE DATABASE IF NOT EXISTS mysql;",
+        "sql:USE mysql;",
+        "{home}/share/mysql_system_tables.sql",
+        "{home}/share/mysql_system_tables_data.sql",
+        "{home}/share/fill_help_tables.sql",
+        "sql:DELETE FROM mysql.user WHERE User='';",
+        "sql:DELETE FROM mysql.proxies_priv WHERE User='';"
+      ],
+      "tools": {"client": "{exe_dir}/mysql.exe", "dump": "{exe_dir}/mysqldump.exe"},
+      "password_reset_sql": ["UPDATE mysql.user SET Password=PASSWORD('{password}') WHERE User='root';", "FLUSH PRIVILEGES;"],
+      "autostart": false,
+      "enabled": true,
+      "stop": {
+        "method": "command",
+        "command": ["{exe_dir}/mysqladmin.exe", "--defaults-extra-file={client_cnf}", "shutdown"]
+      }
+    },
+    {
+      "id": "mysql-5.7",
+      "name": "MySQL 5.7",
+      "type": "mysql",
+      "exe": "bin/mysql/mysql-5.7*/bin/mysqld.exe",
+      "args": ["--defaults-file={config}", "--console"],
+      "ports": [3310],
+      "config_template": "my.ini.j2",
+      "config_file": "etc/mysql-5.7/my.ini",
+      "data_dir": "data/mysql-5.7",
+      "init_command": ["{exe}", "--defaults-file={config}", "--initialize-insecure", "--console"],
+      "tools": {"client": "{exe_dir}/mysql.exe", "dump": "{exe_dir}/mysqldump.exe"},
+      "password_reset_sql": ["ALTER USER 'root'@'localhost' IDENTIFIED BY '{password}';", "FLUSH PRIVILEGES;"],
+      "autostart": false,
+      "enabled": false,
+      "stop": {
+        "method": "command",
+        "command": ["{exe_dir}/mysqladmin.exe", "--defaults-extra-file={client_cnf}", "shutdown"]
+      }
+    },
+    {
+      "id": "mailpit",
+      "name": "Mailpit",
+      "type": "mail",
+      "exe": "bin/mailpit/mailpit.exe",
+      "args": ["--smtp", "127.0.0.1:{ports[0]}", "--listen", "127.0.0.1:{ports[1]}", "--database", "{data_dir}/mailpit.db"],
+      "ports": [1025, 8025],
+      "data_dir": "data/mailpit",
+      "autostart": false,
+      "enabled": true,
+      "stop": {"method": "terminate"},
+      "links": [{"label": "Open Mail Inbox", "url": "http://127.0.0.1:{ports[1]}/"}]
+    },
+    {
+      "id": "dns",
+      "name": "DNS (.test resolver)",
+      "type": "builtin",
+      "module": "varsha.dns.server",
+      "_note": "Optional. Binding 53 needs no admin; routing *.test here does (megha adds an NRPT rule).",
+      "args": ["--port", "{port}"],
+      "ports": [53],
+      "autostart": false,
+      "enabled": true,
+      "stop": {"method": "terminate"}
+    }
+  ]
+}

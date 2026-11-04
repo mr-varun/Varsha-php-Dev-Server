@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>varsha</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <a class="brand" href="#stack" data-view="stack" aria-label="varsha home">
+        <span class="brand-mark"><img src="/static/logo.png" alt=""></span>
+        <span>
+          <span class="brand-name">varsha</span>
+          <span class="brand-tag">local dev stack</span>
+        </span>
+      </a>
+      <nav class="nav" id="nav" aria-label="Sections">
+        <button class="nav-item" data-view="stack" title="Stack (1)">Stack</button>
+        <button class="nav-item" data-view="sites" title="Sites (2)">Sites</button>
+        <button class="nav-item" data-view="databases" title="Databases (3)">Databases</button>
+        <button class="nav-item" data-view="share" title="Share (4)">Share</button>
+        <button class="nav-item" data-view="logs" title="Logs (5)">Logs</button>
+        <button class="nav-item" data-view="system" title="System (6)">System</button>
+      </nav>
+      <span class="topbar-spacer"></span>
+      <div id="meter"></div>
+      <div class="topbar-actions">
+        <button class="btn btn-mint" data-act="start-all">&#9654; Start all</button>
+        <button class="btn" data-act="stop-all">&#9632; Stop all</button>
+        <button class="btn btn-ink" data-act="quit" title="Quit varsha" aria-label="Quit varsha">&#x23FB;</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="offline" id="offline" hidden>Lost contact with varsha. Is it still running? Reconnecting&hellip;</div>
+      <div class="page-head" id="page-head">
+        <div>
+          <p class="eyebrow" id="eyebrow"></p>
+          <h1 id="title"></h1>
+        </div>
+      </div>
+      <section class="view" id="view" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="assertive"></div>
+
+  <dialog class="dialog" id="dialog">
+    <form method="dialog" class="dialog-body" id="dialog-form"></form>
+  </dialog>
+</body>
+</html>
