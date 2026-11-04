@@ -737,3 +737,14 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
   .tickets.tickets-3 { grid-template-columns: 1fr; }
   .tickets-3 .ticket-actions { flex-wrap: wrap; }
 }
+
+/* top bar: the busy note ("⏳ Stop Apache 2.4") hangs below the meter instead of widening it,
+   so starting/stopping a service never pushes the buttons to a new line */
+@media (min-width: 861px) {
+  .meter { position: relative; }
+  .meter-busy {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 5; max-width: 260px;
+    padding: 1px 8px; background: var(--card); border: var(--line-thin); border-radius: 999px;
+    box-shadow: var(--shadow-xs); overflow: hidden; text-overflow: ellipsis;
+  }
+}
