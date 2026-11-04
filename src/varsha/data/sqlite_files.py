@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import threading
 import time
@@ -30,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from varsha.data.access_files import ACCESS_EXTENSIONS, AccessError, AccessReader, engine_name, is_access
+from varsha.data.csv_files import CSV_EXTENSIONS, EDIT_LIMIT, CsvFiles, looks_like_text
 from varsha.paths import AppPaths
 
 logger = logging.getLogger(__name__)
@@ -134,6 +136,7 @@ class DataFiles:
         self._backed_up: set[str] = set()
         self._lock = threading.Lock()
         self.access = AccessReader(paths)
+        self.csv = CsvFiles(paths)
         for entry in self._load_recent():
             self._files[entry["id"]] = Path(entry["path"])
 
@@ -153,12 +156,24 @@ class DataFiles:
         data = self.paths.data.resolve()
         if path == data or data in path.parents:
             raise DataError("Files inside varsha's data folder (server databases, credentials) can't be opened here")
-        if not is_sqlite(path) and not is_access(path):
-            raise DataError(f"{path.name} isn't a SQLite or Access database (a .db file can also be Paradox or another format)")
+        if not (is_sqlite(path) or is_access(path) or (path.suffix.lower() in CSV_EXTENSIONS and looks_like_text(path))):
+            raise DataError(f"{path.name} isn't a SQLite, Access or CSV file (a .db file can also be Paradox or another format)")
         return path
 
+    @staticmethod
+    def kind_of(path: Path) -> str:
+        if is_sqlite(path):
+            return "sqlite"
+        if is_access(path):
+            return "access"
+        return "csv"
+
     def kind(self, file_id: str) -> str:
-        return "access" if is_access(self.path(file_id)) else "sqlite"
+        return self.kind_of(self.path(file_id))
+
+    def _not_csv(self, file_id: str, what: str) -> None:
+        if self.kind(file_id) == "csv":
+            raise DataError(f"{what} isn't available for CSV files")
 
     def _read_only_access(self, file_id: str) -> None:
         if self.kind(file_id) == "access":
@@ -180,6 +195,7 @@ class DataFiles:
             self._save_recent([e for e in self._load_recent() if e["id"] != file_id])
             self._edit.discard(file_id)
         self.access.forget(file_id)
+        self.csv.forget(file_id)
 
     def path(self, file_id: str) -> Path:
         path = self._files.get(file_id)
@@ -264,6 +280,9 @@ class DataFiles:
     def set_edit(self, file_id: str, edit: bool) -> None:
         if edit:
             self._read_only_access(file_id)
+            path = self.path(file_id)
+            if self.kind_of(path) == "csv" and path.stat().st_size > EDIT_LIMIT:
+                raise DataError(f"CSV files over {EDIT_LIMIT // 1048576} MB open read-only")
         self.path(file_id)
         with self._lock:
             (self._edit.add if edit else self._edit.discard)(file_id)
@@ -276,6 +295,9 @@ class DataFiles:
             raise DataError("This file is open read-only: switch on Edit to change it")
         if write and file_id not in self._backed_up:
             self.backup(file_id)
+        if self.kind_of(path) == "csv":
+            self.csv.meta(file_id, path)  # (re)parse into the cache when the file changed
+            path = self.csv.db_path(file_id)
         uri = path.as_uri() + ("?mode=rw" if write else "?mode=ro")
         try:
             conn = sqlite3.connect(uri, uri=True, timeout=3, isolation_level=None, check_same_thread=False)
@@ -364,6 +386,12 @@ class DataFiles:
             pragmas = {name: conn.execute(f"PRAGMA {name}").fetchone()[0]
                        for name in ("journal_mode", "page_size", "page_count", "user_version", "encoding")}
         stat = path.stat()
+        if self.kind_of(path) == "csv":
+            meta = self.csv.meta(file_id, path)
+            return {"id": file_id, "name": path.name, "path": str(path), "size": stat.st_size, "modified": stat.st_mtime,
+                    "kind": "csv", "csv": self.csv.describe(meta), "editable": stat.st_size <= EDIT_LIMIT,
+                    "edit": self.edit_mode(file_id), "tables": tables, "indexes": 0, "triggers": 0, "pragmas": {},
+                    "backups": self.backups(file_id), "sqlite": ""}
         return {"id": file_id, "name": path.name, "path": str(path), "size": stat.st_size, "modified": stat.st_mtime,
                 "kind": "sqlite", "sqlite": sqlite3.sqlite_version, "edit": self.edit_mode(file_id), "tables": tables,
                 "indexes": sum(1 for o in objects if o["type"] == "index"),
@@ -496,10 +524,17 @@ class DataFiles:
             try:
                 result = work(conn)
                 conn.execute("COMMIT")
-                return result
             except BaseException:
                 conn.execute("ROLLBACK")
                 raise
+        path = self.path(file_id)
+        if self.kind_of(path) == "csv":
+            try:
+                self.csv.write_back(file_id, path)
+            except OSError as exc:
+                self.csv.forget(file_id)  # re-read the file next time, so the page never shows unsaved data
+                raise DataError(f"Couldn't save {path.name} (is it open in Excel?): {exc}") from exc
+        return result
 
     def update_cell(self, file_id: str, table: str, key: Any, column: str, value: Any) -> str:
         new = from_cell(value)
@@ -576,6 +611,8 @@ class DataFiles:
         return self._write(file_id, work)
 
     def drop_table(self, file_id: str, table: str) -> str:
+        self._not_csv(file_id, "Dropping the table")
+
         def work(conn: sqlite3.Connection) -> str:
             obj = self._table(conn, table)
             conn.execute(f"DROP {'VIEW' if obj['type'] == 'view' else 'TABLE'} {quote(obj['name'])}")
@@ -597,7 +634,7 @@ class DataFiles:
         if any(re.match(r"\s*(VACUUM|ATTACH|DETACH)\b", s, re.IGNORECASE) for s in statements):
             raise DataError("ATTACH and VACUUM are not allowed in the SQL box (they can reach other files); "
                             "use the Vacuum button to compact the file")
-        write = self.edit_mode(file_id)
+        write = self.edit_mode(file_id) and self.kind(file_id) != "csv"  # CSV: edit in the grid, query here
         started = time.monotonic()
         with self.connect(file_id, write=write) as conn:
             if write:
@@ -637,6 +674,12 @@ class DataFiles:
         path = self.path(file_id)
         self._read_only_access(file_id)
         folder = self.backup_dir(file_id)
+        if self.kind_of(path) == "csv":
+            name = self.csv.backup(path, folder)
+            self._backed_up.add(file_id)
+            for old in sorted(folder.iterdir())[:-KEEP_BACKUPS]:
+                old.unlink(missing_ok=True)
+            return f"Backup saved: {name}"
         folder.mkdir(parents=True, exist_ok=True)
         now = time.time()
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + f"-{int(now * 1000) % 1000:03d}"
@@ -675,10 +718,17 @@ class DataFiles:
         if file_id not in self._edit:
             raise DataError("Switch on Edit to restore a backup")
         source = self.backup_dir(file_id) / Path(str(name)).name
-        if not source.is_file() or not is_sqlite(source):
-            raise DataError("No such backup")
         path = self.path(file_id)
+        csv_file = self.kind_of(path) == "csv"
+        if not source.is_file() or (not csv_file and not is_sqlite(source)):
+            raise DataError("No such backup")
         self.backup(file_id)  # the current state, so the restore itself can be undone
+        if csv_file:
+            tmp = path.with_name(path.name + ".varsha-restore")
+            shutil.copyfile(source, tmp)
+            os.replace(tmp, path)
+            self.csv.forget(file_id)
+            return f"{path.name} restored from {source.name} (the state before is kept as a new backup)"
         try:
             src = sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)
             try:
@@ -694,6 +744,11 @@ class DataFiles:
         return f"{path.name} restored from {source.name} (the state before is kept as a new backup)"
 
     def integrity(self, file_id: str) -> str:
+        path = self.path(file_id)
+        if self.kind_of(path) == "csv":
+            self.csv.forget(file_id)
+            meta = self.csv.meta(file_id, path)
+            return f"Read again: {meta['rows']:,} rows, {len(meta['names'])} columns ({meta['ms']} ms)"
         if self.kind(file_id) == "access":
             tables = self._access(file_id, "tables")["tables"]
             return f"Opened fine: {len(tables)} tables and queries readable"
@@ -706,6 +761,7 @@ class DataFiles:
         raise DataError("Integrity check found problems:\n" + "\n".join(problems[:20]))
 
     def vacuum(self, file_id: str) -> str:
+        self._not_csv(file_id, "Vacuum")
         before = self.path(file_id).stat().st_size
         with self.connect(file_id, write=True) as conn:
             conn.set_authorizer(None)  # VACUUM attaches a temporary database internally; this one is ours
@@ -717,6 +773,7 @@ class DataFiles:
 
     def export_sql(self, file_id: str) -> tuple[bytes, str]:
         path = self.path(file_id)
+        self._not_csv(file_id, "Export .sql")
         with self.connect(file_id) as conn:
             text = "\n".join(conn.iterdump()) + "\n"
         return text.encode("utf-8"), f"{path.stem}.sql"

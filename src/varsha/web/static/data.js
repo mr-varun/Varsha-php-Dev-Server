@@ -44,9 +44,9 @@ function renderDataFiles() {
       ${f.site ? "" : `<button class="data-file-x" data-d="forget" data-id="${esc(f.id)}" title="Remove from the list (the file stays)" aria-label="Remove ${esc(f.name)} from the list">\u00d7</button>`}</span>`;
   box.innerHTML = `<div class="toolbar">
       <button class="btn btn-yellow" data-d="pick">\u{1f4c2} Open file\u2026</button>
-      <p class="muted">Open a SQLite (<code>.db</code>, <code>.sqlite</code>, \u2026) or Access (<code>.mdb</code>, <code>.accdb</code>) database.
-        It opens <b>read-only</b>; SQLite files can be edited after switching on Edit (a backup is saved first).
-        Access files are read from a copy, so the original is never touched.</p></div>
+      <p class="muted">Open a SQLite (<code>.db</code>, <code>.sqlite</code>, \u2026), Access (<code>.mdb</code>, <code>.accdb</code>)
+        or CSV / TSV file. It opens <b>read-only</b>; SQLite and CSV files can be edited after switching on Edit (a backup is saved
+        first, and a CSV keeps its own format). Access files are read from a copy, so the original is never touched.</p></div>
     ${recent.length ? `<div class="data-files"><span class="data-files-label">Recent</span>${recent.map((f) =>
       item(f, f.exists === false ? "missing" : `${fmtBytes(f.size)} \u00b7 ${f.path.replace(/[\\/][^\\/]*$/, "")}`)).join("")}</div>` : ""}
     ${found.length ? `<div class="data-files"><span class="data-files-label">In your sites</span>${found.map((f) =>
@@ -90,6 +90,7 @@ function renderDataMain() {
   }
   const edit = f.edit;
   const access = f.kind === "access";
+  const csv = f.kind === "csv";
   const queries = f.tables.filter((t) => t.type === "view").length;
   const tables = f.tables.map((t) => `<button class="data-table" data-d="table" data-name="${esc(t.name)}" aria-current="${t.name === DATA.table}">
       <span class="grow">${esc(t.name)}</span>${t.type === "view" ? '<span class="chip">view</span>' : ""}
@@ -102,20 +103,24 @@ function renderDataMain() {
           ${access ? `<span class="chip chip-blue">${esc(f.engine)}</span>
             <span class="chip" title="varsha reads a copy; it is refreshed when the file changes">copy from ${esc(fmtDate(f.snapshot))}</span>
             <span class="chip">${plural(f.tables.filter((t) => t.type === "table").length, "table")}, ${queries} ${queries === 1 ? "query" : "queries"}</span>`
+          : csv ? `<span class="chip chip-blue">CSV \u00b7 ${esc(f.csv.delimiter)}</span><span class="chip">${esc(f.csv.encoding)}</span>
+            <span class="chip">${esc(f.csv.newline)}</span><span class="chip">${f.csv.header ? "first row is the header" : "no header row"}</span>
+            <span class="chip">${plural(f.tables[0] ? f.tables[0].rows : 0, "row")}</span>`
           : `<span class="chip">${esc(f.pragmas.journal_mode)} journal</span><span class="chip">SQLite ${esc(f.sqlite)}</span>
             <span class="chip">${plural(f.tables.length, "table")}, ${plural(f.indexes, "index")}${f.triggers ? `, ${plural(f.triggers, "trigger")}` : ""}</span>`}</div>
       </div>
       <div class="data-head-side">
         ${access ? `<span class="chip chip-ink" title="Access files are read from a copy and never changed">\u{1f512} read-only (Access)</span>`
+        : csv && !f.editable ? `<span class="chip chip-ink" title="Big CSV files open read-only">\u{1f512} read-only (over 50 MB)</span>`
         : `<div class="seg" role="group" aria-label="Mode">
           <button class="seg-btn" data-d="mode" data-edit="0" aria-pressed="${!edit}">\u{1f512} Read-only</button>
           <button class="seg-btn" data-d="mode" data-edit="1" aria-pressed="${edit}">\u270f\ufe0f Edit</button></div>`}
         <div class="row">
-          <button class="btn btn-sm" data-d="integrity">${access ? "Reload copy" : "Check"}</button>
-          ${access ? "" : `<button class="btn btn-sm" data-d="vacuum" ${edit ? "" : "disabled"} title="${edit ? "Compact the file" : "Switch on Edit first"}">Vacuum</button>
+          <button class="btn btn-sm" data-d="integrity">${access ? "Reload copy" : csv ? "Read again" : "Check"}</button>
+          ${access ? "" : `${csv ? "" : `<button class="btn btn-sm" data-d="vacuum" ${edit ? "" : "disabled"} title="${edit ? "Compact the file" : "Switch on Edit first"}">Vacuum</button>`}
           <button class="btn btn-sm" data-d="backup">Backup now</button>
           <button class="btn btn-sm" data-d="restore" ${f.backups.length ? "" : "disabled"}>Restore\u2026</button>
-          <a class="btn btn-sm" href="/api/data/${esc(f.id)}/export.sql" download>Export .sql</a>`}</div>
+          ${csv ? "" : `<a class="btn btn-sm" href="/api/data/${esc(f.id)}/export.sql" download>Export .sql</a>`}`}</div>
       </div></div>
     ${edit ? `<div class="banner"><p><b>Edit mode:</b> changes are written to the file right away.
       ${f.backups.length ? `Latest backup: ${esc(f.backups[0].name)}.` : "A backup is saved before your first change."}</p></div>` : ""}
@@ -288,7 +293,7 @@ function renderStructureTab() {
         <input class="input" name="default" placeholder="default (optional)" spellcheck="false" aria-label="Default value">
         <button class="btn btn-sm btn-mint" type="submit">Add column</button>
         <span class="grow"></span>
-        <button class="btn btn-sm btn-coral" type="button" data-d="drop-table">Drop ${s.type}</button></form>` : ""}`;
+        ${DATA.file.kind === "csv" ? "" : `<button class="btn btn-sm btn-coral" type="button" data-d="drop-table">Drop ${s.type}</button>`}</form>` : ""}`;
 }
 
 // ---------------------------------------------------------------- SQL tab
@@ -314,6 +319,7 @@ function renderSqlTab() {
         ? `SELECT TOP 10 * FROM [${esc(DATA.table || "my_table")}]` : `SELECT * FROM ${esc(DATA.table || "my_table")} LIMIT 10;`}">${esc(DATA.sql)}</textarea>
       <div class="row"><button class="btn btn-ink" type="submit">\u25b6 Run</button><span class="muted">Ctrl+Enter.
         ${DATA.file.kind === "access" ? "Access SQL, SELECT only: TOP n instead of LIMIT, [brackets] for names, #2026-11-04# for dates."
+          : DATA.file.kind === "csv" ? `SQLite SQL on the file's rows (table <b>${esc(DATA.table)}</b>), SELECT only: edit rows in the Data tab.`
           : DATA.file.edit ? "Edit is on: the whole script runs in one transaction (all or nothing)." : "Read-only: SELECT and PRAGMA only."}</span></div>
     </form>
     <div id="data-sql-out">${out}</div>
@@ -425,7 +431,7 @@ document.addEventListener("click", async (event) => {
       if (await dataAction("mode", { edit: el.dataset.edit === "1" })) await refreshDataFile();
       return;
     case "integrity":  // Access: "Reload copy" (the copy is refreshed if the file changed)
-      if (await dataAction("integrity") && DATA.file.kind === "access") await refreshDataFile();
+      if (await dataAction("integrity") && DATA.file.kind !== "sqlite") await refreshDataFile();
       return;
     case "vacuum": if (await dataAction("vacuum")) await refreshDataFile(); return;
     case "backup": if (await dataAction("backup")) await refreshDataFile(); return;

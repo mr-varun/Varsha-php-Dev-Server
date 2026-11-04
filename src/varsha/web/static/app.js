@@ -8,7 +8,7 @@ const VIEWS = {
   stack: { title: "Stack", eyebrow: "home" },
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
-  data: { title: "Data", eyebrow: "sqlite \u00b7 access \u00b7 database files" },
+  data: { title: "Data", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
