@@ -83,11 +83,15 @@ unset($s);
     color:var(--vx-muted); margin:0 0 10px; display:flex; align-items:center; gap:8px; }
   .vx-group-title span { background:var(--vx-text); color:var(--vx-yellow); border-radius:5px; padding:0 6px; }
   /* small cards that fill the width: more remote servers just add cards */
-  .vx-servers { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; margin-bottom:24px; }
-  .vx-srv { display:flex; flex-direction:column; gap:6px; background:var(--vx-paper); border:3px solid var(--vx-edge);
-    border-radius:10px; box-shadow:var(--vx-shadow-sm); padding:12px; cursor:pointer; transition:transform .08s, box-shadow .08s; min-width:0; }
-  .vx-srv-top { display:flex; align-items:center; gap:8px; min-width:0; }
-  .vx-srv .vx-btn { align-self:stretch; text-align:center; margin-top:auto; padding:6px 10px; }
+  /* one compact row per server; the panel scrolls when the list gets long */
+  .vx-servers { display:flex; flex-direction:column; gap:10px; margin-bottom:22px; }
+  .vx-srv { display:grid; grid-template-columns:1fr auto; grid-template-areas:"top btn" "meta btn"; align-items:center;
+    column-gap:12px; row-gap:2px; background:var(--vx-paper); border:3px solid var(--vx-edge);
+    border-radius:9px; box-shadow:var(--vx-shadow-xs); padding:8px 10px 8px 12px; cursor:pointer; transition:transform .08s, box-shadow .08s; min-width:0; }
+  .vx-srv:hover { box-shadow:var(--vx-shadow-sm) !important; }
+  .vx-srv-top { grid-area:top; display:flex; align-items:center; gap:8px; min-width:0; }
+  .vx-srv .vx-meta { grid-area:meta; padding-left:22px; }
+  .vx-srv .vx-btn { grid-area:btn; padding:5px 12px; font-size:13px; box-shadow:2px 2px 0 #121212; }
   .vx-center-logo { display:none; }
   @media (max-width: 1180px) {
     .vx-center-logo { display:grid; width:52px; height:52px; border:3px solid #121212; border-radius:14px; background:var(--vx-blue);
