@@ -54,6 +54,35 @@ def test_seed_config_copies_defaults_once(tmp_path):
     assert paths.settings_file.read_text(encoding="utf-8") == "{}"  # live settings are never overwritten
 
 
+def test_start_page_created_updated_and_user_edits_kept(tmp_path):
+    root = tmp_path / "root"
+    (root / "etc" / "templates").mkdir(parents=True)
+    template = root / "etc" / "templates" / paths_mod.START_PAGE
+    template.write_text("<?php // v1", encoding="utf-8")
+    paths = AppPaths(root)
+    page = paths.www / "index.php"
+    assert paths.seed_start_page() == "created" and page.read_text(encoding="utf-8") == "<?php // v1"
+    assert paths.seed_start_page() == "current"
+    template.write_text("<?php // v2", encoding="utf-8")
+    assert paths.seed_start_page() == "updated" and page.read_text(encoding="utf-8") == "<?php // v2"
+    page.write_text("<?php // my edit", encoding="utf-8")
+    template.write_text("<?php // v3", encoding="utf-8")
+    assert paths.seed_start_page() == "kept" and page.read_text(encoding="utf-8") == "<?php // my edit"
+
+
+def test_existing_start_page_is_adopted_or_kept(tmp_path):
+    paths = AppPaths(tmp_path)  # no own templates: uses the bundled start page
+    paths.www.mkdir(parents=True)
+    page = paths.www / "index.php"
+    page.write_bytes((REPO / "etc" / "templates" / paths_mod.START_PAGE).read_bytes())
+    assert paths.seed_start_page() == "current"  # an install from before: recorded, so later versions update it
+    assert (paths.data / "start-page.sha256").is_file()
+    other = AppPaths(tmp_path / "other")
+    other.www.mkdir(parents=True)
+    (other.www / "index.php").write_text("<?php echo 'mine';", encoding="utf-8")
+    assert other.seed_start_page() == "kept"
+
+
 def test_frozen_commands_use_run_module(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     command = elevate.megha_command(AppPaths(tmp_path))

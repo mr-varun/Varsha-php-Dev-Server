@@ -1323,7 +1323,7 @@ function taskDialog(existing, templateKey) {
       <label>Site<select class="input" name="site">${opts(sites, t.site)}</select></label>
       <label>Runs in<select class="input" name="where">${opts([["project", "Project folder (where artisan / composer.json is)"], ["site", "The site's www folder"]], t.where === "custom" ? "project" : t.where)}</select></label>
     </div>
-    <label>\u2026or a custom folder (used when no site is chosen)<input class="input mono" name="cwd" value="${esc(t.cwd)}" spellcheck="false" placeholder="D:\\Work\\scripts"></label>
+    <label>\u2026or a custom folder (used when no site is chosen)<input class="input mono" name="cwd" value="${esc(t.cwd)}" spellcheck="false" placeholder="D:\\scripts"></label>
     <div class="form-row even">
       <label>How often<select class="input" name="every">${opts(EVERY_OPTIONS, t.every)}</select></label>
       <label>At (daily / weekly)<input class="input" type="time" name="at" value="${esc(t.at)}"></label>

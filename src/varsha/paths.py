@@ -6,6 +6,7 @@ Portability rule: no other module builds an absolute path on its own. Everything
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import sys
@@ -14,6 +15,7 @@ from pathlib import Path
 
 ROOT_ENV_VAR = "VARSHA_ROOT"
 DEFAULT_CONFIGS = ("services.json", "settings.json")
+START_PAGE = "start-page.php"
 
 
 def bundle_dir() -> Path:
@@ -103,3 +105,39 @@ class AppPaths:
             dest, source = self.config / name, bundle_dir() / "config" / name
             if not dest.exists() and source.is_file() and source.resolve() != dest.resolve():
                 shutil.copy2(source, dest)
+
+    def seed_start_page(self) -> str:
+        """www\\index.php (the http://localhost/ start page) comes from etc\\templates\\start-page.php.
+
+        Created when missing, and updated to a newer version only while it is still exactly the
+        copy varsha put there last time (its SHA-256 is kept in data\\start-page.sha256). A page the
+        user edited, or their own index.php, is never touched. Returns what happened."""
+        source = self.templates / START_PAGE
+        dest, stamp = self.www / "index.php", self.data / "start-page.sha256"
+        if not source.is_file():
+            return "no-template"
+        new = source.read_bytes()
+        new_hash = hashlib.sha256(new).hexdigest()
+        try:
+            last = stamp.read_text(encoding="ascii").strip()
+        except OSError:
+            last = ""
+        if dest.exists():
+            current = hashlib.sha256(dest.read_bytes()).hexdigest()
+            if current == new_hash:
+                result = "current"
+            elif current != last:
+                return "kept"  # the user's own page (or edited copy)
+            else:
+                result = "updated"
+        else:
+            result = "created"
+        if result != "current":
+            self.www.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_name("index.php.varsha-new")
+            tmp.write_bytes(new)
+            os.replace(tmp, dest)
+        if last != new_hash:
+            self.data.mkdir(parents=True, exist_ok=True)
+            stamp.write_text(new_hash, encoding="ascii")
+        return result

@@ -49,6 +49,8 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; script-src '
 MAIL_CSP = ("default-src 'none'; img-src data:{remote}; style-src 'unsafe-inline'{remote}; font-src data:{remote}; "
             "frame-ancestors 'self'; form-action 'none'; sandbox allow-popups allow-popups-to-escape-sandbox")
 MAX_UPLOAD = 4 * 1024 * 1024 * 1024
+REFUSE_DRAIN_LIMIT = 64 * 1024  # after refusing a POST, read at most this much before closing
+REFUSE_LINGER_SECONDS = 2
 SERVICE_ACTIONS = {"start", "stop", "restart", "backup", "password", "heidisql", "restore",
                    "autobackup", "autobackup-run"}
 
@@ -280,9 +282,23 @@ class PanelHandler(BaseHTTPRequestHandler):
 
     def _refuse(self, status: int, message: str) -> None:
         """Answer a POST we won't process. Its body must not stay in the connection: on a
-        keep-alive connection it would be read as the start of the next request ("{}POST ...")."""
+        keep-alive connection it would be read as the start of the next request ("{}POST ...").
+
+        Closing a socket that still has unread data (the body, or a request pipelined after it)
+        makes Windows send a TCP reset, and the client may then get "connection reset" instead of
+        this answer. So it's a lingering close, as Apache does: answer, stop sending, then read
+        and drop what the client still sends (bounded in size and time) before closing."""
         self.close_connection = True
         self._error(status, message)
+        try:
+            self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_WR)
+            self.connection.settimeout(REFUSE_LINGER_SECONDS)
+            left = REFUSE_DRAIN_LIMIT
+            while left > 0 and (chunk := self.rfile.read1(min(left, 16384))):
+                left -= len(chunk)
+        except (OSError, socket.timeout, ValueError):
+            pass
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._host_ok():

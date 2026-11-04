@@ -85,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
     paths.seed_config()
     setup_logging(paths.app_log)
     logger.info("varsha starting, root=%s", paths.root)
+    try:
+        logger.info("start page: %s", paths.seed_start_page())
+    except OSError as exc:  # never block startup over the start page
+        logger.warning("start page not written: %s", exc)
 
     app = QApplication([sys.argv[0], *qt_args])
     app.setApplicationName("varsha")

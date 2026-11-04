@@ -182,7 +182,7 @@ def parse_task(raw: Any, task_id: str, where: str = "task") -> TaskPlan:
     if not isinstance(cwd, str):
         raise ConfigError(f"{where}: the folder must be text")
     if place == "custom" and not (cwd and Path(cwd).is_absolute()):
-        raise ConfigError(f"{where}: choose a site, or give a full folder path like D:\\Work\\scripts")
+        raise ConfigError(f"{where}: choose a site, or give a full folder path like D:\\scripts")
     if place != "custom" and not site:
         raise ConfigError(f"{where}: choose a site, or give a full folder path")
     fields["cwd"] = cwd.strip()

@@ -41,7 +41,7 @@ def git(cwd: Path, *args: str) -> None:
 
 @pytest.fixture
 def monorepo(tmp_path: Path) -> Path:
-    """Like example-monorepo: one repository, one folder per project, each with public\\."""
+    """A monorepo: one repository, one folder per project, each with public\\."""
     repo = tmp_path / "Websites"
     for project in ("Admin", "Banking"):
         (repo / project / "public").mkdir(parents=True)

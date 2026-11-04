@@ -16,6 +16,7 @@ dist/
 /logs/
 
 # Built and personal files
+/CLAUDE.local.md
 /Varsha.exe
 /build/
 /config/remote-databases.json

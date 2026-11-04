@@ -9,16 +9,16 @@ import pytest
 
 from varsha.php.errors import PhpErrorWatcher, locate, parse_lines
 
-# Real lines from varsha's logs (the banking app under PHP 5.4 and 8.3).
+# Real lines from varsha's logs (an older app under PHP 5.4 and 8.3).
 WARNING = ("[04-Nov-2026 10:46:03 UTC] PHP Warning:  mysqli_num_rows() expects parameter 1 to be mysqli_result, "
-           "boolean given in E:\\Projects\\billing\\BANK\\index.php on line 14")
-NOTICE = "[04-Nov-2026 10:46:03 UTC] PHP Notice:  Undefined variable: branchname in E:\\Projects\\billing\\BANK\\index.php on line 60"
-FATAL = """[04-Nov-2026 10:55:43 UTC] PHP Fatal error:  Uncaught mysqli_sql_exception: Access denied for user 'root'@'localhost' (using password: NO) in E:\\Projects\\ledger\\BANK\\connection.php:9
+           "boolean given in E:\\Projects\\billing\\app\\index.php on line 14")
+NOTICE = "[04-Nov-2026 10:46:03 UTC] PHP Notice:  Undefined variable: branchname in E:\\Projects\\billing\\app\\index.php on line 60"
+FATAL = """[04-Nov-2026 10:55:43 UTC] PHP Fatal error:  Uncaught mysqli_sql_exception: Access denied for user 'root'@'localhost' (using password: NO) in E:\\Projects\\ledger\\app\\connection.php:9
 Stack trace:
-#0 E:\\Projects\\ledger\\BANK\\connection.php(9): mysqli_connect('localhost', 'root', Object(SensitiveParameterValue), 'appdb', 3308)
-#1 E:\\Projects\\ledger\\BANK\\index.php(5): include('E:\\\\BANKING_SOFT...')
+#0 E:\\Projects\\ledger\\app\\connection.php(9): mysqli_connect('localhost', 'root', Object(SensitiveParameterValue), 'appdb', 3308)
+#1 E:\\Projects\\ledger\\app\\index.php(5): include('E:\\\\Projects\\\\le...')
 #2 {main}
-  thrown in E:\\Projects\\ledger\\BANK\\connection.php on line 9"""
+  thrown in E:\\Projects\\ledger\\app\\connection.php on line 9"""
 
 
 def test_parses_levels_messages_locations_and_stack_traces() -> None:
@@ -26,7 +26,7 @@ def test_parses_levels_messages_locations_and_stack_traces() -> None:
     assert [e.level for e in entries] == ["Warning", "Notice", "Fatal error"]
     message, file, line = locate(entries[0])
     assert message.startswith("mysqli_num_rows() expects parameter 1") and line == 14
-    assert file == "E:\\Projects\\billing\\BANK\\index.php"
+    assert file == "E:\\Projects\\billing\\app\\index.php"
     fatal = entries[2]
     assert len(fatal.lines) == 6  # the stack trace belongs to the fatal error
     message, file, line = locate(fatal)
