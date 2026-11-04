@@ -31,6 +31,7 @@ from varsha.php.errors import PhpErrorWatcher
 from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
+from varsha.data.sqlite_files import DataFiles
 from varsha.services.importer import Importer
 from varsha.services.manager import ServiceManager
 from varsha.services.models import ServiceState
@@ -109,6 +110,7 @@ class PanelApp:
         self.doctor = Doctor(paths, manager, engine, sites, self.scheduler, self.databases,
                              dns_route=self.dns_route_active)
         self.git = SiteGit()
+        self.data = DataFiles(paths)
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -255,6 +257,14 @@ class PanelApp:
         if self.folder_picker is None:
             raise ServiceError("The folder picker isn't available; type the path instead")
         return str(self.folder_picker(title[:80]) or "")
+
+    def pick_data_file(self) -> dict[str, Any] | None:
+        """The Data page's "Open file…": a native dialog, then the file is checked and remembered."""
+        if self.folder_picker is None:
+            raise ServiceError("The file dialog isn't available")
+        chosen = self.folder_picker("Open a SQLite database", "file",
+                                    "SQLite databases (*.db *.sqlite *.sqlite3 *.db3 *.s3db *.sl3);;All files (*)")
+        return self.data.register(chosen) if chosen else None
 
     def shutdown(self) -> None:
         self.php_errors.stop()

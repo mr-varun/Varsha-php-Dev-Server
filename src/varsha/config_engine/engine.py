@@ -194,6 +194,9 @@ class ConfigEngine:
             localhost = self.ensure_cert("localhost", ["localhost", "127.0.0.1", "::1"]) if has_ssl_module else None
             context["localhost_cert"] = localhost
             context["ssl_enabled"] = localhost is not None
+            # IncludeOptional forgives a pattern with no matches, but not a missing folder.
+            (self.paths.etc / "apache" / "sites-enabled").mkdir(parents=True, exist_ok=True)
+            self.lan_dir.mkdir(parents=True, exist_ok=True)
         return context
 
     # ------------------------------------------------------------------ sites + HTTPS

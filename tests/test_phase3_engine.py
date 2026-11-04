@@ -73,6 +73,21 @@ def test_httpd_conf_default_site_and_https_listener(root: Path) -> None:
     assert "<IfModule ssl_module>" in conf
 
 
+def test_every_include_folder_exists_on_a_fresh_install(root: Path) -> None:
+    """IncludeOptional forgives a pattern with no matches, but a missing folder stops Apache
+    ("Could not open directory ...lan-enabled"), which happened on the first start after an update."""
+    import re
+
+    from varsha.services.models import Installation
+    engine = make_engine(root)
+    engine.prepare(engine.services[0], Installation(root / "bin/apache/httpd-2.4.68/bin/httpd.exe", "2.4.68"))
+    conf = (root / "etc/apache/httpd.conf").read_text(encoding="utf-8")
+    folders = [Path(p).parent for p in re.findall(r'^\s*Include(?:Optional)?\s+"([^"]+)"', conf, re.MULTILINE)]
+    assert len(folders) >= 2
+    for folder in folders:
+        assert folder.is_dir(), folder
+
+
 # ---------------------------------------------------------------------- remote databases in phpMyAdmin
 
 def test_remote_server_auto_login_config(root: Path) -> None:

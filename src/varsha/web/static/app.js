@@ -8,6 +8,7 @@ const VIEWS = {
   stack: { title: "Stack", eyebrow: "home" },
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
+  data: { title: "Data", eyebrow: "sqlite files \u00b7 browse \u00b7 edit \u00b7 query" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
@@ -1437,6 +1438,10 @@ function render() {
     if (!$("#errors")) { host.innerHTML = viewErrorsSkeleton(); loadErrors(); }
     return;
   }
+  if (view === "data") {
+    if (!$("#data")) { host.innerHTML = viewDataSkeleton(); renderData(); }  // data.js manages the page
+    return;
+  }
   if (view === "doctor") {
     if (!$("#doctor")) { host.innerHTML = viewDoctorSkeleton(); renderDoctor(); if (!DOC.result) runDoctor(); }
     return;
@@ -1899,7 +1904,7 @@ document.addEventListener("toggle", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.target.closest("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
   const index = "1234567890".indexOf(event.key);
-  if (index >= 0) go(Object.keys(VIEWS)[index]);
+  if (index >= 0) go(Object.keys(VIEWS).filter((k) => k !== "data")[index]);  // keys 1-0 stay as they were
   if (event.key === "Escape" && openMenu) { openMenu = null; render(); }
 });
 

@@ -77,8 +77,8 @@ class _MainThread(QObject):
 
 
 class _FolderRequest:
-    def __init__(self, title: str, start: str) -> None:
-        self.title, self.start = title, start
+    def __init__(self, title: str, start: str, mode: str = "folder", filters: str = "") -> None:
+        self.title, self.start, self.mode, self.filters = title, start, mode, filters
         self.result = ""
         self.done = threading.Event()
 
@@ -93,7 +93,10 @@ def _show_folder_dialog(request: _FolderRequest) -> None:
         owner.raise_()
         owner.activateWindow()
         try:
-            chosen = QFileDialog.getExistingDirectory(owner, request.title, request.start)
+            if request.mode == "file":
+                chosen = QFileDialog.getOpenFileName(owner, request.title, request.start, request.filters)[0]
+            else:
+                chosen = QFileDialog.getExistingDirectory(owner, request.title, request.start)
         finally:
             owner.close()
             owner.deleteLater()
@@ -105,15 +108,15 @@ def _show_folder_dialog(request: _FolderRequest) -> None:
 
 
 def make_folder_picker(main_thread: _MainThread) -> Any:
-    """For HTTP threads: ask the Qt thread for a folder and wait (one dialog at a time)."""
+    """For HTTP threads: ask the Qt thread for a folder (or a file) and wait (one dialog at a time)."""
     busy = threading.Lock()
     last = {"folder": ""}
 
-    def pick(title: str) -> str:
+    def pick(title: str, mode: str = "folder", filters: str = "") -> str:
         if not busy.acquire(blocking=False):
-            raise ServiceError("A folder dialog is already open (it may be behind another window)")
+            raise ServiceError("A file dialog is already open (it may be behind another window)")
         try:
-            request = _FolderRequest(title, last["folder"])
+            request = _FolderRequest(title, last["folder"], mode, filters)
             main_thread.pick_folder.emit(request)
             request.done.wait(15 * 60)
             if request.result:

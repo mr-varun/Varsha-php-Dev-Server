@@ -37,6 +37,7 @@ STATIC_FILES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/static/app.css": ("app.css", "text/css; charset=utf-8"),
     "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/static/data.js": ("data.js", "text/javascript; charset=utf-8"),
     "/static/logo.png": ("logo.png", "image/png"),
     "/favicon.ico": ("varsha.ico", "image/x-icon"),
 }
@@ -185,6 +186,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/data":
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.data.listing()))
+        elif m := re.fullmatch(r"/api/data/([0-9a-f]{16})(?:/(rows|structure|cell|export\.sql|export\.csv))?", parts.path):
+            self._guarded(lambda: self._data_get(m.group(1), m.group(2) or "", query))
         elif m := re.fullmatch(r"/api/lan/([a-z0-9.-]+)/qr", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.sites.lan_qr(m.group(1))))
         elif parts.path == "/api/sites/git":
@@ -329,6 +334,59 @@ class PanelHandler(BaseHTTPRequestHandler):
             return
         self._guarded(lambda: self._post(path, body))
 
+    def _data_get(self, file_id: str, what: str, query: dict[str, list[str]]) -> None:
+        data = self.app.data
+        arg = lambda name, default="": (query.get(name) or [default])[0]  # noqa: E731
+        if what == "":
+            self._json(HTTPStatus.OK, data.overview(file_id))
+        elif what == "structure":
+            self._json(HTTPStatus.OK, data.structure(file_id, arg("table")))
+        elif what == "rows":
+            self._json(HTTPStatus.OK, data.rows(file_id, arg("table"), int(arg("offset", "0")), int(arg("limit", "100")),
+                                                arg("order"), arg("desc") == "1", arg("q"), arg("column")))
+        elif what == "cell":
+            self._json(HTTPStatus.OK, data.get_cell(file_id, arg("table"), json.loads(arg("key", "null")), arg("column")))
+        elif what == "export.sql":
+            body, name = data.export_sql(file_id)
+            self._download(body, "application/sql", name)
+        else:
+            body, name = data.export_csv(file_id, arg("table"))
+            self._download(body, "text/csv", name)
+
+    def _data_post(self, file_id: str, action: str, body: dict[str, Any]) -> Any:
+        data = self.app.data
+        table = str(body.get("table") or "")
+        if action == "mode":
+            data.set_edit(file_id, body.get("edit") is True)
+            return "Edit mode on: changes are saved to the file (a backup is made first)" if body.get("edit") is True \
+                else "Read-only again"
+        if action == "update":
+            return data.update_cell(file_id, table, body.get("key"), str(body.get("column") or ""), body.get("value"))
+        if action == "insert":
+            return data.insert_row(file_id, table, body.get("values"))
+        if action == "delete":
+            return data.delete_rows(file_id, table, body.get("keys"))
+        if action == "sql":
+            return data.run_sql(file_id, str(body.get("sql") or ""))
+        if action == "add-column":
+            return data.add_column(file_id, table, str(body.get("name") or ""), str(body.get("type") or ""), body.get("default"))
+        if action == "drop-table":
+            if body.get("confirm") != table:
+                raise ValueError("type the table name to confirm")
+            return data.drop_table(file_id, table)
+        if action == "backup":
+            return data.backup(file_id)
+        if action == "restore":
+            return data.restore(file_id, str(body.get("name") or ""))
+        if action == "integrity":
+            return data.integrity(file_id)
+        if action == "vacuum":
+            return data.vacuum(file_id)
+        if action == "forget":
+            data.forget(file_id)
+            return "Removed from the list (the file itself is untouched)"
+        raise ValueError(f"unknown action {action}")
+
     def _guarded(self, action: Any) -> None:
         try:
             action()
@@ -453,6 +511,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(m.group(1))})
         elif path == "/api/terminal":
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(None)})
+        elif path == "/api/data/pick":
+            self._json(HTTPStatus.OK, {"file": app.pick_data_file()})
+        elif m := re.fullmatch(r"/api/data/([0-9a-f]{16})/([a-z-]+)", path):
+            self._json(HTTPStatus.OK, {"message": self._data_post(m.group(1), m.group(2), body)})
         elif path == "/api/pick-folder":
             # A native Windows folder dialog, shown by the tray app: the page gets back the path
             # the user picked, but can never make varsha read or list a folder by itself.
