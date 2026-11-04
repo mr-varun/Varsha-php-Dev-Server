@@ -956,6 +956,8 @@ function dialog(html, onSubmit) {
   const dlg = $("#dialog");
   const form = $("#dialog-form");
   form.innerHTML = html;
+  // Cancel must close the dialog without the browser first demanding the required fields.
+  form.querySelectorAll('button[value="cancel"]').forEach((b) => { b.formNoValidate = true; });
   form.onsubmit = async (event) => {
     const button = event.submitter;
     if (!button || button.value === "cancel") return;
