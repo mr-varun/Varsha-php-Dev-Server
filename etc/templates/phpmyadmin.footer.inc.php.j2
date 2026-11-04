@@ -49,7 +49,7 @@ unset($s);
   .vx-logo { width:64px; height:64px; border:3px solid #121212; border-radius:16px; background:#121212;
     box-shadow:5px 5px 0 #121212; display:grid; place-items:center; transform:rotate(-4deg); }
   .vx-logo svg { width:36px; height:36px; }
-  .vx-side h1 { text-align:left; font-family:var(--vx-font); font-size:42px; line-height:1; margin:0; color:#fff; font-weight:800; letter-spacing:-.5px; }
+  #loginform .vx-side h1 { text-align:left; font-family:var(--vx-font); font-size:42px; line-height:1; margin:0; color:#fff; font-weight:800; letter-spacing:-.5px; }
   .vx-side h1 small { display:block; font-size:16px; font-weight:600; letter-spacing:0; margin-top:10px; color:#dfe4ff; }
   .vx-facts { list-style:none; margin:0; padding:0; display:grid; gap:12px; }
   .vx-facts li { background:#fff; color:#121212; border:3px solid #121212; border-radius:10px; box-shadow:4px 4px 0 #121212;
@@ -61,23 +61,28 @@ unset($s);
   .vx-side .vx-back:hover { transform:translate(-2px,-2px); box-shadow:6px 6px 0 #121212; color:#121212; }
 
   /* right: servers + form */
-  .vx-main { padding:48px 34px 56px; max-width:640px; width:100%; margin:0 auto; }
+  .vx-main { padding:44px 36px 56px; max-width:1180px; width:100%; }
   .vx-main h2 { font-family:var(--vx-font); font-size:24px; margin:0 0 6px; font-weight:800; color:var(--vx-text); }
-  .vx-lead { margin:0 0 18px; color:var(--vx-muted); }
-  .vx-servers { display:grid; gap:12px; margin-bottom:30px; }
-  .vx-srv { display:flex; align-items:center; gap:14px; background:var(--vx-card); border:3px solid var(--vx-edge);
-    border-radius:10px; box-shadow:var(--vx-shadow-sm); padding:12px 14px; cursor:pointer; transition:transform .08s, box-shadow .08s; }
+  .vx-lead { margin:0 0 20px; color:var(--vx-muted); }
+  .vx-group-title { font-family:var(--vx-mono); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1px;
+    color:var(--vx-muted); margin:0 0 10px; display:flex; align-items:center; gap:8px; }
+  .vx-group-title span { background:var(--vx-text); color:var(--vx-yellow); border-radius:5px; padding:0 6px; }
+  /* small cards that fill the width: more remote servers just add cards */
+  .vx-servers { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:14px; margin-bottom:26px; }
+  .vx-srv { display:flex; flex-direction:column; gap:8px; background:var(--vx-card); border:3px solid var(--vx-edge);
+    border-radius:10px; box-shadow:var(--vx-shadow-sm); padding:12px; cursor:pointer; transition:transform .08s, box-shadow .08s; min-width:0; }
+  .vx-srv-top { display:flex; align-items:center; gap:8px; min-width:0; }
+  .vx-srv .vx-btn { align-self:stretch; text-align:center; margin-top:auto; padding:6px 10px; }
+  .vx-main .vx-form, .vx-main .vx-alerts, .vx-main .vx-lang { max-width:520px; }
   .vx-srv:hover { transform:translate(-2px,-2px); box-shadow:var(--vx-shadow); }
   .vx-srv.picked { background:var(--vx-yellow); color:#121212; }
   .vx-srv.picked .vx-meta { color:#3b392f; }
   .vx-srv.down { cursor:default; opacity:.65; box-shadow:var(--vx-shadow-xs); }
   .vx-srv.down:hover { transform:none; box-shadow:var(--vx-shadow-xs); }
-  .vx-dot { width:16px; height:16px; border-radius:50%; border:2px solid currentColor; background:var(--vx-grey); flex:none; }
+  .vx-dot { width:14px; height:14px; border-radius:50%; border:2px solid currentColor; background:var(--vx-grey); flex:none; }
   .vx-dot.up { background:var(--vx-mint); }
-  .vx-srv-text { flex:1; min-width:0; }
-  .vx-name { display:block; font-weight:700; font-size:16px; }
-  .vx-meta { display:block; font-family:var(--vx-mono); font-size:12.5px; color:var(--vx-muted); word-break:break-all; }
-  .vx-tag { font-family:var(--vx-mono); font-size:11px; border:2px solid currentColor; border-radius:5px; padding:0 6px; margin-left:6px; vertical-align:2px; }
+  .vx-name { font-weight:700; font-size:15px; line-height:1.2; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .vx-meta { display:block; font-family:var(--vx-mono); font-size:11.5px; color:var(--vx-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .vx-btn { font-family:var(--vx-font); font-weight:700; font-size:14px; border:3px solid #121212; border-radius:7px; padding:7px 14px;
     background:var(--vx-blue); color:#fff; box-shadow:3px 3px 0 #121212; cursor:pointer; text-decoration:none; white-space:nowrap; }
   .vx-btn:hover { transform:translate(-1px,-1px); box-shadow:4px 4px 0 #121212; color:#fff; }
@@ -129,27 +134,35 @@ unset($s);
     <main class="vx-main">
       <h2>Pick a server</h2>
       <p class="vx-lead">Green means it's running. Start stopped ones from the varsha panel.</p>
-      <div class="vx-servers">
-        <?php foreach ($varshaServers as $s):
-            $kind = $s['remote'] ? ($s['auto'] ? 'remote-auto' : 'remote') : 'local';
-            $meta = $s['remote'] ? ($s['host'] . ':' . (int) $s['port']) : ('127.0.0.1:' . (int) $s['port']);
-            $state = $s['remote'] ? 'remote' : ($s['up'] ? 'running' : 'not running'); ?>
-        <div class="vx-srv<?= (!$s['remote'] && !$s['up']) ? ' down' : '' ?>" data-server="<?= (int) $s['index'] ?>"
-             data-kind="<?= $kind ?>" data-name="<?= htmlspecialchars($s['name']) ?>" data-up="<?= $s['up'] ? '1' : '0' ?>">
-          <span class="vx-dot<?= $s['up'] ? ' up' : '' ?>"></span>
-          <span class="vx-srv-text">
-            <span class="vx-name"><?= htmlspecialchars($s['name']) ?><?= $s['remote'] ? '<span class="vx-tag">remote</span>' : '' ?></span>
-            <span class="vx-meta"><?= htmlspecialchars($meta) ?> · <?= $state ?></span>
-          </span>
-          <?php if ($kind === 'remote-auto'): ?>
-            <a class="vx-btn" href="index.php?server=<?= (int) $s['index'] ?>" title="Saved password: opens directly">Open</a>
-          <?php elseif ($kind === 'remote'): ?>
-            <button type="button" class="vx-btn ghost" data-vx="use">Sign in</button>
-          <?php else: ?>
-            <button type="button" class="vx-btn" data-vx="login" <?= $s['up'] ? '' : 'disabled' ?> title="Log in as root with an empty password">Log in</button>
-          <?php endif; ?>
+      <div class="vx-groups">
+      <?php
+        $varshaGroups = array('This PC' => array(), 'Remote' => array());
+        foreach ($varshaServers as $s) { $varshaGroups[$s['remote'] ? 'Remote' : 'This PC'][] = $s; }
+        foreach ($varshaGroups as $groupName => $groupServers):
+          if (!$groupServers) { continue; } ?>
+        <p class="vx-group-title"><?= $groupName ?> <span><?= count($groupServers) ?></span></p>
+        <div class="vx-servers">
+          <?php foreach ($groupServers as $s):
+              $kind = $s['remote'] ? ($s['auto'] ? 'remote-auto' : 'remote') : 'local';
+              $meta = $s['remote'] ? ($s['host'] . ':' . (int) $s['port']) : (':' . (int) $s['port'] . ' · ' . ($s['up'] ? 'running' : 'stopped')); ?>
+          <div class="vx-srv<?= (!$s['remote'] && !$s['up']) ? ' down' : '' ?>" data-server="<?= (int) $s['index'] ?>"
+               data-kind="<?= $kind ?>" data-name="<?= htmlspecialchars($s['name']) ?>" title="<?= htmlspecialchars($s['name'] . ' · ' . $s['host'] . ':' . (int) $s['port']) ?>">
+            <div class="vx-srv-top">
+              <span class="vx-dot<?= $s['up'] ? ' up' : '' ?>"></span>
+              <span class="vx-name"><?= htmlspecialchars($s['name']) ?></span>
+            </div>
+            <span class="vx-meta"><?= htmlspecialchars($meta) ?></span>
+            <?php if ($kind === 'remote-auto'): ?>
+              <a class="vx-btn" href="index.php?server=<?= (int) $s['index'] ?>" title="Saved password: opens directly">Open</a>
+            <?php elseif ($kind === 'remote'): ?>
+              <button type="button" class="vx-btn ghost" data-vx="use">Sign in</button>
+            <?php else: ?>
+              <button type="button" class="vx-btn" data-vx="login" <?= $s['up'] ? '' : 'disabled' ?> title="Log in as root with an empty password">Log in</button>
+            <?php endif; ?>
+          </div>
+          <?php endforeach; ?>
         </div>
-        <?php endforeach; ?>
+      <?php endforeach; ?>
       </div>
       <div class="vx-alerts"></div>
       <div class="vx-form"></div>
@@ -219,7 +232,7 @@ unset($s);
   var current = select && shell.querySelector('.vx-srv[data-server="' + select.value + '"]');
   pick(current || tiles[0]);
 
-  shell.querySelector('.vx-servers').addEventListener('click', function (event) {
+  shell.querySelector('.vx-groups').addEventListener('click', function (event) {
     var tile = event.target.closest('.vx-srv');
     if (!tile || event.target.closest('a')) { return; }
     var action = event.target.closest('[data-vx]');
