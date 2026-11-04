@@ -133,14 +133,24 @@ class SiteManager:
     def update_hosts(self) -> str:
         """Write all site names into varsha's hosts block via megha (UAC prompt)."""
         names = self.wanted_host_names()
+
+        def verify() -> str | None:  # reading the hosts file needs no admin rights
+            return f"hosts file updated: {len(names)} names" if hosts.is_in_sync(self.hosts_text(), names) else None
+
         message = elevate.run_elevated(self.paths, ["hosts-sync", "--tld", self.tld],
-                                       request={"tld": self.tld, "names": names})
+                                       request={"tld": self.tld, "names": names}, verify=verify)
         self._notify()
         return message
 
     def dns_route(self, enable: bool) -> str:
         args = ["dns-route-add", "--tld", self.tld] if enable else ["dns-route-remove"]
-        message = elevate.run_elevated(self.paths, args)
+
+        def verify() -> str | None:
+            if elevate.dns_route_active(self.tld) != enable:
+                return None
+            return f"*.{self.tld} now resolves through varsha's DNS (127.0.0.1)" if enable else "DNS route removed"
+
+        message = elevate.run_elevated(self.paths, args, verify=verify)
         self._notify()
         return message
 

@@ -10,7 +10,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from varsha.errors import ServiceError
@@ -48,8 +49,35 @@ def megha_command(paths: AppPaths) -> list[str]:
     return [str(pythonw if pythonw.is_file() else Path(sys.executable)), "-m", "varsha.helper.megha"]
 
 
-def run_elevated(paths: AppPaths, args: Sequence[str], request: dict[str, object] | None = None) -> str:
-    """Run megha with admin rights. Blocks until it exits; call from a worker thread.
+RESULT_WAIT = 60.0  # seconds to wait for megha's result when Windows gave us no process to wait on
+RESULT_GRACE = 5.0  # seconds to wait for the result file after megha's process ended
+
+
+def _read_result(result_file: Path) -> dict[str, object] | None:
+    try:
+        outcome = json.loads(result_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return outcome if isinstance(outcome, dict) and "ok" in outcome else None
+
+
+def _wait_for_result(result_file: Path, timeout: float) -> dict[str, object] | None:
+    deadline = time.monotonic() + timeout
+    while True:
+        outcome = _read_result(result_file)
+        if outcome is not None or time.monotonic() >= deadline:
+            return outcome
+        time.sleep(0.2)
+
+
+def run_elevated(paths: AppPaths, args: Sequence[str], request: dict[str, object] | None = None,
+                 verify: Callable[[], str | None] | None = None) -> str:
+    """Run megha with admin rights. Blocks until it is done; call from a worker thread.
+
+    Some Windows setups (e.g. Windows 11's "Administrator protection") hand back no process to
+    wait on, or let the call return before megha has written its result. So the result file is
+    polled for a while, and when it never appears, `verify()` checks the effect itself (it needs
+    no admin rights): a message means the change is in place.
 
     Raises ElevationCancelled if the user says No at the UAC prompt.
     """
@@ -62,11 +90,16 @@ def run_elevated(paths: AppPaths, args: Sequence[str], request: dict[str, object
             request_file.write_text(json.dumps(request), encoding="utf-8")
             full += ["--request", str(request_file)]
         command = megha_command(paths)
-        code = _shell_execute_runas(command[0], [*command[1:], *full], cwd=paths.root)
-        try:
-            outcome = json.loads(result_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            raise ServiceError(f"megha exited ({code}) without a result") from None
+        code, waited = _shell_execute_runas(command[0], [*command[1:], *full], cwd=paths.root)
+        outcome = _wait_for_result(result_file, RESULT_GRACE if waited else RESULT_WAIT)
+        if outcome is None:
+            logger.warning("megha (%s) gave no result: exit code %s, process handle %s, files %s",
+                           args[0], code, "yes" if waited else "none",
+                           sorted(p.name for p in work.iterdir()))
+            confirmed = verify() if verify else None
+            if confirmed:
+                return confirmed
+            raise ServiceError(f"megha exited ({code}) without a result. Check {paths.app_log.name} for details.")
         if not outcome.get("ok"):
             raise ServiceError(f"megha: {outcome.get('message', 'failed')}")
         return str(outcome.get("message", "done"))
@@ -74,7 +107,8 @@ def run_elevated(paths: AppPaths, args: Sequence[str], request: dict[str, object
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _shell_execute_runas(exe: str, args: Sequence[str], cwd: Path) -> int:
+def _shell_execute_runas(exe: str, args: Sequence[str], cwd: Path) -> tuple[int | None, bool]:
+    """Start `exe` elevated. Returns (exit code, whether we could wait for the process)."""
     if sys.platform != "win32":  # pragma: no cover
         raise ServiceError("Elevation is only supported on Windows")
     info = _ShellExecuteInfo()
@@ -96,11 +130,14 @@ def _shell_execute_runas(exe: str, args: Sequence[str], cwd: Path) -> int:
         if error == ERROR_CANCELLED:
             raise ElevationCancelled("You declined the administrator prompt, so nothing was changed.")
         raise ServiceError(f"Could not start megha (error {error})")
+    if not info.hProcess:
+        return None, False  # Windows started it but gave us nothing to wait on
     try:
         kernel32.WaitForSingleObject(info.hProcess, INFINITE)
         code = ctypes.wintypes.DWORD()
-        kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(code))
-        return int(code.value)
+        if not kernel32.GetExitCodeProcess(info.hProcess, ctypes.byref(code)):
+            return None, False
+        return int(code.value), True
     finally:
         kernel32.CloseHandle(info.hProcess)
 
