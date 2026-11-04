@@ -34,7 +34,7 @@ def test_shipped_services_json_is_valid() -> None:
     assert {"apache", "mariadb-11.8", "mysql-8.4", "mysql-5.6", "mailpit", "dns"} <= set(ids)
     by_id = {s.id: s for s in services}
     assert by_id["apache"].stop.method is StopMethod.APACHE_SIGNAL
-    assert by_id["mysql-8.4"].ports == (3308,)
+    assert by_id["mysql-8.4"].ports == (3307,)
     assert by_id["dns"].is_builtin and by_id["dns"].exe is None
 
 
