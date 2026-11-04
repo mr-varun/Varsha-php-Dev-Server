@@ -248,6 +248,14 @@ class PanelApp:
         self.events.publish("state")
         self._pool.submit(self.scheduler.run_now, service_id)
 
+    # Set by the GUI: shows a native folder dialog on the Qt thread and returns the path ("" = cancelled).
+    folder_picker: Any = None
+
+    def pick_folder(self, title: str) -> str:
+        if self.folder_picker is None:
+            raise ServiceError("The folder picker isn't available; type the path instead")
+        return str(self.folder_picker(title[:80]) or "")
+
     def shutdown(self) -> None:
         self.php_errors.stop()
         self.scheduler.stop()

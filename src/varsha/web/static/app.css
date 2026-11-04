@@ -564,6 +564,8 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .dialog-body label.kind:has(input:disabled) { opacity: .45; cursor: not-allowed; }
 .kind input { position: absolute; opacity: 0; }
 .kind small { font-weight: 500; color: var(--muted); }
+.dialog-body label[hidden] { display: none; }
+.pick-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); }
 .dialog-body label small.muted { font-weight: 500; }
 @media (max-width: 600px) { .kinds { grid-template-columns: 1fr; } .form-row { flex-direction: column; } .form-row label:first-child { width: auto; } }
 .sys-grid .card-wide { grid-column: 1 / -1; }

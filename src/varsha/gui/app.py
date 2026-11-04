@@ -19,11 +19,11 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QLockFile, QObject, Signal
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QDir, QLockFile, QObject, Qt, Signal
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
 from varsha.config_engine.engine import ConfigEngine
-from varsha.errors import ConfigError
+from varsha.errors import ConfigError, ServiceError
 from varsha.gui.tray import Tray
 from varsha.logging_setup import setup_logging
 from varsha.paths import AppPaths
@@ -73,6 +73,56 @@ class _MainThread(QObject):
     # app.quit() from a worker holds the GIL while it waits on the Qt thread, which can deadlock
     # with a Qt thread that is waiting on the GIL (seen when quitting with no services to stop).
     exit_loop = Signal()
+    pick_folder = Signal(object)  # a _FolderRequest, answered on the Qt thread
+
+
+class _FolderRequest:
+    def __init__(self, title: str, start: str) -> None:
+        self.title, self.start = title, start
+        self.result = ""
+        self.done = threading.Event()
+
+
+def _show_folder_dialog(request: _FolderRequest) -> None:
+    """Qt thread only. A tiny always-on-top owner keeps the dialog in front of the browser,
+    which has the focus when the user clicks "Browse"."""
+    try:
+        owner = QWidget(None, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+        owner.resize(1, 1)
+        owner.show()
+        owner.raise_()
+        owner.activateWindow()
+        try:
+            chosen = QFileDialog.getExistingDirectory(owner, request.title, request.start)
+        finally:
+            owner.close()
+            owner.deleteLater()
+        request.result = QDir.toNativeSeparators(chosen) if chosen else ""
+    except Exception:
+        logger.exception("Folder dialog failed")
+    finally:
+        request.done.set()
+
+
+def make_folder_picker(main_thread: _MainThread) -> Any:
+    """For HTTP threads: ask the Qt thread for a folder and wait (one dialog at a time)."""
+    busy = threading.Lock()
+    last = {"folder": ""}
+
+    def pick(title: str) -> str:
+        if not busy.acquire(blocking=False):
+            raise ServiceError("A folder dialog is already open (it may be behind another window)")
+        try:
+            request = _FolderRequest(title, last["folder"])
+            main_thread.pick_folder.emit(request)
+            request.done.wait(15 * 60)
+            if request.result:
+                last["folder"] = str(Path(request.result).parent)
+            return request.result
+        finally:
+            busy.release()
+
+    return pick
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
 
     main_thread.quit_requested.connect(shutdown)
     main_thread.exit_loop.connect(app.quit)
+    main_thread.pick_folder.connect(_show_folder_dialog, Qt.ConnectionType.QueuedConnection)
+    panel.folder_picker = make_folder_picker(main_thread)
 
     manager.adopt_running()
     sites.lan_stop_all()  # a crashed session must not leave a site on the LAN

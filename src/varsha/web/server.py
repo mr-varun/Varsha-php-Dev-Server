@@ -451,13 +451,20 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(m.group(1))})
         elif path == "/api/terminal":
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(None)})
+        elif path == "/api/pick-folder":
+            # A native Windows folder dialog, shown by the tray app: the page gets back the path
+            # the user picked, but can never make varsha read or list a folder by itself.
+            self._json(HTTPStatus.OK, {"path": app.pick_folder(str(body.get("title") or "Choose a folder"))})
         elif path == "/api/create":
             kind, name = str(body.get("kind", "")), str(body.get("name", "")).strip().lower()
             db = str(body.get("db") or "") or None
             php = str(body.get("php") or "") or None
+            source = str(body.get("source") or "") or None
+            if kind == "link":
+                app.tools.link_source(source)  # a wrong folder is reported in the dialog, before anything starts
 
             def create() -> str:
-                message = app.tools.create(kind, name, db, php)
+                message = app.tools.create(kind, name, db, php, source=source)
                 app.sites.sync()
                 return message
 

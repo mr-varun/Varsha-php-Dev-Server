@@ -189,3 +189,56 @@ def test_terminal_script_puts_tools_on_path(root: Path, engine: ConfigEngine, to
 def test_delete_only_inside_www(root: Path, tools: DevTools) -> None:
     with pytest.raises(ServiceError, match="No site"):
         tools.delete_site("nope.test")
+
+
+# ---------------------------------------------------------------------- Link a folder
+
+@pytest.fixture
+def project(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A project outside the varsha root, like D:\\Work\\...\\ReportDesk."""
+    folder = tmp_path_factory.mktemp("projects") / "ReportDesk"
+    (folder / "public").mkdir(parents=True)
+    (folder / "public" / "index.php").write_text("<?php echo 'rd';", encoding="utf-8")
+    (folder / "src.php").write_text("<?php // code", encoding="utf-8")
+    return folder
+
+
+def test_link_a_folder_creates_a_junction(root: Path, tools: DevTools, engine: ConfigEngine, project: Path) -> None:
+    message = tools.create("link", "rdesk", source=str(project), php="5.4")
+    link = root / "www" / "rdesk"
+    assert link.is_junction() and "linked to" in message
+    assert (link / "public" / "index.php").read_text(encoding="utf-8") == "<?php echo 'rd';"
+    site = next(s for s in engine.sites() if s.domain == "rdesk.test")
+    assert site.docroot.name == "public"  # its public\ is the web root
+    assert json.loads((root / "config/sites.json").read_text(encoding="utf-8"))["sites"]["rdesk"]["php"] == "5.4"
+    assert sorted(p.name for p in project.iterdir()) == ["public", "src.php"]  # nothing written into the project
+
+
+def test_deleting_a_linked_site_removes_only_the_link(root: Path, tools: DevTools, project: Path) -> None:
+    tools.create("link", "rdesk", source=str(project))
+    message = tools.delete_site("rdesk.test")
+    assert "unlinked" in message and str(project) in message
+    assert not (root / "www" / "rdesk").exists() and not (root / "www" / "rdesk").is_junction()
+    assert (project / "public" / "index.php").is_file() and (project / "src.php").is_file()  # untouched
+
+
+@pytest.mark.parametrize("bad", ["", "relative\\folder", "missing"])
+def test_link_source_must_be_an_existing_absolute_folder(root: Path, tools: DevTools, project: Path, bad: str) -> None:
+    source = str(project.parent / "missing") if bad == "missing" else bad
+    with pytest.raises(ServiceError):
+        tools.create("link", "rdesk", source=source)
+    assert not (root / "www" / "rdesk").exists()
+
+
+def test_link_refuses_varsha_itself_drives_and_files(root: Path, tools: DevTools, project: Path) -> None:
+    for source in (root, root / "www", root / "data", Path(root.anchor)):
+        with pytest.raises(ServiceError):
+            tools.link_source(str(source))
+    with pytest.raises(ServiceError, match="isn't a folder"):
+        tools.link_source(str(project / "src.php"))
+    assert tools.link_source(f'"{project}"') == project.resolve()  # pasted "Copy as path" quotes are fine
+
+
+def test_laravel_is_gone(tools: DevTools) -> None:
+    with pytest.raises(ServiceError, match="Unknown site type"):
+        tools.create("laravel", "shop")

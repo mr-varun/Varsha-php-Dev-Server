@@ -159,7 +159,7 @@ function phpSelect(site) {
     .concat(usablePhp().map((p) => `<option value="${esc(p.version)}" ${site.php && p.label === site.php_label ? "selected" : ""}>${esc(p.label)}</option>`));
   return `<select class="select" data-site-php="${esc(site.domain)}" aria-label="PHP version for ${esc(site.domain)}">${options.join("")}</select>`;
 }
-const siteChips = (site) => `<span class="chip ${site.https ? "chip-mint" : ""}">${site.https ? `${LOCK} HTTPS` : "HTTP only"}</span>
+const siteChips = (site) => `${site.link ? `<span class="chip" title="links to ${esc(site.link)}">link</span>` : ""}<span class="chip ${site.https ? "chip-mint" : ""}">${site.https ? `${LOCK} HTTPS` : "HTTP only"}</span>
   <span class="chip ${site.in_hosts ? "chip-blue" : "chip-yellow"}">${site.in_hosts ? "hosts \u2714" : "not in hosts"}</span>${lanShare(site.domain)
     ? `<span class="chip chip-ink" title="${esc(lanShare(site.domain).url || "")}">LAN :${lanShare(site.domain).port}</span>` : ""}`;
 const lanShare = (domain) => ((S.lan && S.lan.shares) || []).find((s) => s.domain === domain);
@@ -1600,13 +1600,17 @@ function createDialog() {
   const running = dbs().filter((s) => s.state === "running");
   const def = defaultPhp();
   const kinds = [["blank", "Blank PHP", "A public/index.php to start from."],
-    ["laravel", "Laravel", S.composer ? "composer create-project laravel/laravel (needs internet, ~1 min)." : "Needs bin\\composer\\composer.phar."],
+    ["link", "Link a folder", "Use a project folder that lives elsewhere (a junction, like mklink /J). Nothing is copied or changed."],
     ["wordpress", "WordPress", "Latest release from wordpress.org with wp-config.php filled in."]];
   dialog(`<h2>Quick Create</h2>
-    <div class="kinds">${kinds.map(([k, t, d], i) => `<label class="kind"><input type="radio" name="kind" value="${k}" ${i === 0 ? "checked" : ""}
-      ${k === "laravel" && !S.composer ? "disabled" : ""}><b>${t}</b><small>${esc(d)}</small></label>`).join("")}</div>
+    <div class="kinds">${kinds.map(([k, t, d], i) => `<label class="kind"><input type="radio" name="kind" value="${k}" ${i === 0 ? "checked" : ""}>
+      <b>${t}</b><small>${esc(d)}</small></label>`).join("")}</div>
+    <label class="link-only" hidden>Project folder
+      <div class="pick-row"><input class="input mono" name="source" placeholder="D:\\Projects\\shop" spellcheck="false" autocomplete="off">
+        <button class="btn" type="button" data-pick-folder>Browse\u2026</button></div>
+      <small class="muted">Its <code>public\\</code> folder is used as the web root when it has one. Deleting the site later removes only the link.</small></label>
     <label>Folder name<input class="input" name="name" placeholder="shop" pattern="[a-z0-9][a-z0-9-]*" required spellcheck="false" autocomplete="off">
-      <small class="muted">Becomes <b>name.${esc(S.tld)}</b> · lowercase letters, digits and "-".</small></label>
+      <small class="muted">Becomes <b>name.${esc(S.tld)}</b> \u00b7 lowercase letters, digits and "-".</small></label>
     <div class="form-row even">
       <label>PHP<select class="select" name="php"><option value="">Default (${esc(def ? def.version : "?")})</option>
         ${usablePhp().map((p) => `<option value="${esc(p.version)}">${esc(p.label)}</option>`).join("")}</select></label>
@@ -1617,17 +1621,52 @@ function createDialog() {
     <div class="form-error"></div>
     <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn btn-yellow" value="ok">Create site</button></div>`,
   async (form) => {
-    await api.post("/api/create", { kind: form.get("kind"), name: form.get("name"), php: form.get("php"), db: form.get("db") });
-    toast({ ok: true, title: "Creating…", message: "Follow along in Logs → Quick Create." });
+    const kind = form.get("kind");
+    await api.post("/api/create", { kind, name: form.get("name"), php: form.get("php"), db: form.get("db"),
+      source: kind === "link" ? form.get("source") : "" });
+    toast({ ok: true, title: "Creating\u2026", message: kind === "link" ? "The site appears in a second." : "Follow along in Logs \u2192 Quick Create." });
+  });
+  const form = $("#dialog-form");
+  const linkRow = form.querySelector(".link-only");
+  const source = form.elements.source;
+  const name = form.elements.name;
+  let autoName = true;  // fill the name from the folder until the user types one
+  name.addEventListener("input", () => { autoName = name.value === ""; });
+  const slug = (path) => (path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const fillName = () => { if (autoName && source.value) name.value = slug(source.value); };
+  source.addEventListener("input", fillName);
+  const sync = () => {
+    const link = form.elements.kind.value === "link";
+    linkRow.hidden = !link;
+    source.required = link;
+  };
+  form.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", sync));
+  form.querySelector("[data-pick-folder]").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const picked = (await api.post("/api/pick-folder", { title: "Choose the project folder" })).path;
+      if (picked) { source.value = picked; fillName(); }
+    } catch (err) {
+      form.querySelector(".form-error").textContent = err.message;
+    } finally {
+      button.disabled = false;
+    }
   });
 }
 
 function deleteSiteDialog(domain) {
+  const site = S.sites.find((s) => s.domain === domain);
+  const what = site && site.link
+    ? `<p>This site is a <b>link</b> to <code>${esc(site.link)}</code>. Only the link in <code>www\\</code> is removed:
+       the project folder and its files are <b>not touched</b>. Its database is <b>not</b> deleted.</p>`
+    : `<p>The folder moves to the <b>Windows Recycle Bin</b>, so you can restore it from there. Its database is <b>not</b> deleted.</p>`;
   dialog(`<h2>Delete ${esc(domain)}?</h2>
-    <p>The folder moves to the <b>Windows Recycle Bin</b>, so you can restore it from there. Its database is <b>not</b> deleted.</p>
+    ${what}
     <label>Type <code>${esc(domain)}</code> to confirm<input class="input" name="confirm" autocomplete="off" spellcheck="false"></label>
     <div class="form-error"></div>
-    <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn btn-coral" value="ok">Move to Recycle Bin</button></div>`,
+    <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn btn-coral" value="ok">${site && site.link ? "Remove link" : "Move to Recycle Bin"}</button></div>`,
   async (form) => {
     if (form.get("confirm") !== domain) throw new Error(`Type ${domain} exactly to confirm.`);
     await api.post(`/api/sites/${domain}/delete`, { confirm: domain });

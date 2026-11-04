@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 WORDPRESS_ZIP = "https://wordpress.org/latest.zip"
 CREATE_TIMEOUT = 1800
 CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-KINDS = ("blank", "laravel", "wordpress")
+KINDS = ("blank", "link", "wordpress")
 
 
 # ---------------------------------------------------------------------- settings.json
@@ -134,6 +134,14 @@ class DevTools:
     def delete_site(self, domain: str) -> str:
         """Move the site's folder to the Windows Recycle Bin (recoverable). Databases stay."""
         site = self.site(domain)
+        link = self.paths.www / site.folder.name
+        if is_link(link):
+            # A junction (Quick Create "Link a folder", or mklink /J): remove the link only.
+            # The project folder it points to is never touched, so nothing goes to the Recycle Bin.
+            target = link_target(link)
+            os.rmdir(link)  # on a junction or symlink this deletes the link, not the target
+            save_override(self.paths.config / "sites.json", site.folder.name, php=None, docroot=None)
+            return f"{site.folder.name} unlinked. The project folder {target} was not touched."
         folder = site.folder.resolve()
         if folder.parent != self.paths.www.resolve():
             raise ServiceError("Only folders directly inside www\\ can be deleted")
@@ -186,14 +194,15 @@ class DevTools:
     # ------------------------------------------------------------------ Quick Create
 
     def create(self, kind: str, name: str, db_service: str | None = None, php: str | None = None,
-               log: Path | None = None) -> str:
+               log: Path | None = None, source: str | None = None) -> str:
         if kind not in KINDS:
             raise ServiceError(f"Unknown site type {kind!r}")
         slug = slugify(name)
         if not slug or slug != name.lower():
             raise ServiceError(f'Use a simple folder name like "shop" or "client-site" (got "{name}")')
         folder = self.paths.www / slug
-        if folder.exists():
+        source_dir = self.link_source(source) if kind == "link" else None
+        if folder.exists() or is_link(folder):
             raise ServiceError(f"www\\{slug} already exists")
         build = self.engine.find_php(php) if php else self.engine.default_php()
         if build is None:
@@ -205,8 +214,11 @@ class DevTools:
         try:
             if kind == "blank":
                 self._create_blank(folder, slug, build, db)
-            elif kind == "laravel":
-                self._create_laravel(folder, build, db, log)
+            elif kind == "link":
+                assert source_dir is not None
+                self.paths.www.mkdir(parents=True, exist_ok=True)
+                make_junction(source_dir, folder)
+                self._log(log, f"linked www\\{slug} -> {source_dir}")
             else:
                 self._create_wordpress(folder, db, log)
         except Exception:
@@ -218,7 +230,26 @@ class DevTools:
             self._create_database(db)
         self._log(log, "done")
         extra = f", database {db['name']} on {db['service_name']}" if db else ""
-        return f"{slug}.{self.engine.settings.tld} created ({kind}{extra})"
+        what = f"linked to {source_dir}" if source_dir else kind
+        return f"{slug}.{self.engine.settings.tld} created ({what}{extra})"
+
+    def link_source(self, source: str | None) -> Path:
+        """The folder a linked site points to: an existing folder outside varsha's own root."""
+        text = (source or "").strip().strip('"')
+        if not text:
+            raise ServiceError("Choose the project folder to link")
+        path = Path(text)
+        if not path.is_absolute():
+            raise ServiceError(f"Give the full path of the folder, like D:\\Projects\\shop (got {text})")
+        if not path.is_dir():
+            raise ServiceError(f"{text} isn't a folder")
+        resolved = path.resolve()
+        if resolved.parent == resolved:
+            raise ServiceError("Link a project folder, not a whole drive")
+        root = self.paths.root.resolve()
+        if resolved == root or root in resolved.parents or resolved in root.parents:
+            raise ServiceError("That folder is part of varsha itself; link a project folder from elsewhere")
+        return resolved
 
     def _log(self, log: Path, line: str) -> None:
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -250,43 +281,6 @@ class DevTools:
         db_line = (f"$db = new mysqli('127.0.0.1', 'root', getenv('DB_PASSWORD') ?: '', '{db['name']}', {db['port']});\n"
                    if db else "")
         (public / "index.php").write_text(BLANK_INDEX.replace("{{slug}}", slug).replace("{{db}}", db_line), encoding="utf-8")
-
-    def _run(self, cmd: list[str], cwd: Path, build: PhpBuild, log: Path) -> None:
-        env = dict(os.environ)
-        env["PATH"] = f"{build.folder};{self.paths.etc / 'shims'};{env.get('PATH', '')}"
-        env["COMPOSER_HOME"] = str(self.paths.data / "composer")
-        env["PHPRC"] = str(self.engine.php_ini_dir(build))
-        self._log(log, "> " + subprocess.list2cmdline(cmd))
-        with open(log, "ab") as out:
-            result = subprocess.run(cmd, cwd=str(cwd), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
-                                    env=env, timeout=CREATE_TIMEOUT, creationflags=proc_utils.CREATE_NO_WINDOW)
-        if result.returncode != 0:
-            raise ServiceError(f"{Path(cmd[0]).name} failed (exit {result.returncode}). See Logs → Quick Create.")
-
-    def _create_laravel(self, folder: Path, build: PhpBuild, db: dict[str, Any] | None, log: Path) -> None:
-        phar = self.paths.bin / "composer" / "composer.phar"
-        if not phar.is_file():
-            raise ServiceError("Composer is missing (bin\\composer\\composer.phar)")
-        self.engine.generate_php_ini(build)
-        self.write_shims(build)
-        self._run([str(build.php_exe), str(phar), "create-project", "laravel/laravel", folder.name,
-                   "--prefer-dist", "--no-interaction"], self.paths.www, build, log)
-        if db:
-            env_file = folder / ".env"
-            text = env_file.read_text(encoding="utf-8")
-            values = {"DB_CONNECTION": "mariadb" if "maria" in db["service"] else "mysql", "DB_HOST": db["host"],
-                      "DB_PORT": str(db["port"]), "DB_DATABASE": db["name"], "DB_USERNAME": db["user"],
-                      "DB_PASSWORD": db["password"]}
-            for key, value in values.items():
-                pattern = re.compile(rf"^#?\s*{key}=.*$", re.MULTILINE)
-                line = f"{key}={value}"
-                text = pattern.sub(line, text) if pattern.search(text) else text + f"\n{line}"
-            env_file.write_text(text, encoding="utf-8")
-            self._create_database(db)
-            try:
-                self._run([str(build.php_exe), "artisan", "migrate", "--force"], folder, build, log)
-            except ServiceError:
-                self._log(log, "migrate failed: the site works, run `php artisan migrate` later")
 
     def _create_wordpress(self, folder: Path, db: dict[str, Any] | None, log: Path) -> None:
         self._log(log, f"downloading {WORDPRESS_ZIP}")
@@ -334,6 +328,31 @@ def write_wp_config(folder: Path, db: dict[str, Any]) -> None:
     sample = re.sub(r"'put your unique phrase here'",
                     lambda _m: php("".join(secrets.choice(alphabet) for _ in range(64))), sample)
     (folder / "wp-config.php").write_text(sample, encoding="utf-8")
+
+
+def is_link(path: Path) -> bool:
+    """A junction (mklink /J) or a symbolic link, even one whose target is gone."""
+    try:
+        return path.is_junction() or path.is_symlink()
+    except OSError:
+        return False
+
+
+def link_target(path: Path) -> str:
+    try:
+        return os.readlink(path).removeprefix("\\\\?\\")
+    except OSError:
+        return "(unknown)"
+
+
+def make_junction(source: Path, link: Path) -> None:
+    """mklink /J without a console: junctions need no admin rights and work across drives."""
+    import _winapi  # Windows only; part of the standard library
+
+    try:
+        _winapi.CreateJunction(str(source), str(link))
+    except OSError as exc:
+        raise ServiceError(f"Couldn't create the link {link.name} -> {source}: {exc}") from exc
 
 
 def send_to_recycle_bin(path: Path) -> bool:

@@ -9,6 +9,7 @@ whether it's out of date; update_hosts() asks megha to fix it (one UAC prompt).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,6 +43,7 @@ class SiteInfo:
     in_hosts: bool  # resolvable through the hosts file (varsha's block or another tool's)
     php: str | None  # the version asked for in sites.json, None = default
     php_label: str  # what it actually runs, e.g. "8.3.33 TS x64"
+    link: str = ""  # the folder a junction/symlink in www points to ("" = a real folder)
 
 
 class SiteManager:
@@ -110,6 +112,7 @@ class SiteManager:
                 in_hosts=site.domain in mapped,
                 php=site.php,
                 php_label=build.label if build else f"PHP {site.php} missing",
+                link=_link_target(self.paths.www / site.folder.name),
             ))
         return infos
 
@@ -305,6 +308,15 @@ class _WwwHandler(FileSystemEventHandler):
         # The watch is top-level only, so every create/delete/rename here matters.
         if event.event_type in ("created", "deleted", "moved"):
             self.callback()
+
+
+def _link_target(path: Path) -> str:
+    try:
+        if path.is_junction() or path.is_symlink():
+            return os.readlink(path).removeprefix("\\\\?\\")
+    except OSError:
+        pass
+    return ""
 
 
 def _relative(path: Path, root: Path) -> str:
