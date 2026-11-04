@@ -339,11 +339,14 @@ function viewSites() {
       <div class="row"><button class="btn btn-yellow" data-act="create">+ Quick Create</button>
       <button class="btn" data-act="open" data-what="www">Open www folder</button></div></div>`);
   } else {
-    parts.push(`<div class="tickets">${S.sites.map((site) => `<article class="ticket">
-        <a class="ticket-domain" href="${esc(site.url)}" target="_blank" rel="noopener">${esc(site.domain)}</a>
-        <div class="row">${siteChips(site)}</div>
-        <div class="ticket-meta">folder&nbsp; ${esc(site.folder)}<br>root&nbsp;&nbsp;&nbsp; ${esc(site.docroot)}</div>
-        <label class="php-pick"><span>PHP</span>${phpSelect(site)}</label>
+    parts.push(`<div class="tickets tickets-3">${S.sites.map((site) => `<article class="ticket">
+        <div class="ticket-head"><a class="ticket-domain" href="${esc(site.url)}" target="_blank" rel="noopener">${esc(site.domain)}</a>
+          <div class="row">${siteChips(site)}</div></div>
+        <div class="ticket-mid">
+          <div class="ticket-meta" title="folder ${esc(site.folder)}\nroot ${esc(site.docroot)}">${esc(site.folder)}${site.docroot !== site.folder
+            ? `<br><span class="muted">root</span> ${esc(site.docroot)}` : ""}</div>
+          <label class="php-pick"><span>PHP</span>${phpSelect(site)}</label>
+        </div>
         <div class="ticket-actions">
           <a class="btn btn-sm btn-blue" href="${esc(site.url)}" target="_blank" rel="noopener">Open \u2197</a>
           ${site.https ? `<a class="btn btn-sm" href="${esc(site.url.replace("https://", "http://"))}" target="_blank" rel="noopener">http</a>` : ""}

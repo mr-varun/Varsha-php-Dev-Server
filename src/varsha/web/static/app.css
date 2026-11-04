@@ -716,3 +716,24 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 /* home site rows: in a narrow tile the badges wrap instead of squeezing the site name to one letter */
 .site-row { flex-wrap: wrap; }
 .site-row strong { min-width: 140px; }
+
+/* ------------------------------------------------------------------ sites: 3 per row, shorter cards */
+
+.tickets.tickets-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); }
+.tickets-3 .ticket { gap: var(--s2); padding: var(--s3) var(--s4); }
+.tickets-3 .ticket::before { top: 52px; }
+.tickets-3 .ticket-head { display: flex; align-items: center; gap: var(--s2); min-height: 38px; }
+.tickets-3 .ticket-domain { flex: 1; min-width: 0; min-height: 0; font-size: 19px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tickets-3 .ticket-head .row { flex: none; flex-wrap: nowrap; }
+.tickets-3 .ticket-mid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(150px, 210px); align-items: center; gap: var(--s3); margin-top: var(--s2); }
+.tickets-3 .ticket-meta { margin: 0; line-height: 1.45; }
+.tickets-3 .php-pick { margin: 0; }
+.tickets-3 .php-pick .select { min-width: 0; width: 100%; }
+.tickets-3 .ticket-actions { flex-wrap: nowrap; gap: 6px; }
+.tickets-3 .ticket-actions .btn { min-height: 30px; padding: 3px 9px; font-size: 12.5px; }
+.tickets-3 .ticket-actions .btn-coral { margin-left: auto; }
+@media (max-width: 1100px) { .tickets.tickets-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) {
+  .tickets.tickets-3 { grid-template-columns: 1fr; }
+  .tickets-3 .ticket-actions { flex-wrap: wrap; }
+}
