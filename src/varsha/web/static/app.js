@@ -9,6 +9,7 @@ const VIEWS = {
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
   data: { title: "Data", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
+  rescue: { title: "MDB Rescue", eyebrow: "recover a damaged access database" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
@@ -1470,6 +1471,10 @@ function render() {
     if (!$("#data")) { host.innerHTML = viewDataSkeleton(); renderData(); }  // data.js manages the page
     return;
   }
+  if (view === "rescue") {
+    if (!$("#rescue")) { host.innerHTML = viewRescueSkeleton(); renderRescue(); }  // rescue.js manages the page
+    return;
+  }
   if (view === "doctor") {
     if (!$("#doctor")) { host.innerHTML = viewDoctorSkeleton(); renderDoctor(); if (!DOC.result) runDoctor(); }
     return;
@@ -1982,6 +1987,7 @@ function connect() {
   source.addEventListener("toast", (event) => { toast(JSON.parse(event.data)); scheduleRefresh(); });
   source.addEventListener("mail", (event) => onMailEvent(JSON.parse(event.data)));
   source.addEventListener("php_error", (event) => onPhpErrorEvent(JSON.parse(event.data)));
+  source.addEventListener("rescue", (event) => onRescueEvent(JSON.parse(event.data)));
   source.onerror = () => { clearTimeout(offlineTimer); offlineTimer = setTimeout(() => { $("#offline").hidden = false; }, 2500); };
 }
 

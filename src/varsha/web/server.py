@@ -38,6 +38,7 @@ STATIC_FILES = {
     "/static/app.css": ("app.css", "text/css; charset=utf-8"),
     "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/static/data.js": ("data.js", "text/javascript; charset=utf-8"),
+    "/static/rescue.js": ("rescue.js", "text/javascript; charset=utf-8"),
     "/static/logo.png": ("logo.png", "image/png"),
     "/favicon.ico": ("varsha.ico", "image/x-icon"),
 }
@@ -186,6 +187,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/rescue":
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescue_listing()))
+        elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})", parts.path):
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescue.job(m.group(1))))
         elif parts.path == "/api/data":
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.data.listing()))
         elif m := re.fullmatch(r"/api/data/([0-9a-f]{16})(?:/(rows|structure|cell|export\.sql|export\.csv))?", parts.path):
@@ -511,6 +516,25 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(m.group(1))})
         elif path == "/api/terminal":
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(None)})
+        elif path == "/api/rescue/pick":
+            self._json(HTTPStatus.OK, {"file": app.pick_rescue_file()})
+        elif path == "/api/rescue/start":
+            options = body.get("options") if isinstance(body.get("options"), dict) else {}
+            self._json(HTTPStatus.OK, {"message": app.rescue.start(str(body.get("file") or ""), str(body.get("preset") or ""), options)})
+        elif path == "/api/rescue/stop":
+            self._json(HTTPStatus.OK, {"message": app.rescue.stop()})
+        elif path == "/api/rescue/forget":
+            app.rescue.forget(str(body.get("file") or ""))
+            self._json(HTTPStatus.OK, {"ok": True})
+        elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})/(open|data|import)", path):
+            job, action = m.group(1), m.group(2)
+            if action == "open":
+                self._json(HTTPStatus.OK, {"message": app.rescue.open(job, str(body.get("what") or "folder"))})
+            elif action == "data":
+                self._json(HTTPStatus.OK, {"file": app.rescue_to_data(job, str(body.get("key") or ""))})
+            else:
+                service, database = str(body.get("service") or ""), str(body.get("database") or "").strip()
+                task(f"Import into {database}", app.rescue_import, job, service, database, success=lambda msg: msg)
         elif path == "/api/data/pick":
             self._json(HTTPStatus.OK, {"file": app.pick_data_file()})
         elif m := re.fullmatch(r"/api/data/([0-9a-f]{16})/([a-z-]+)", path):

@@ -154,7 +154,8 @@ class DataFiles:
         if not path.is_file():
             raise DataError(f"{path} isn't a file")
         data = self.paths.data.resolve()
-        if path == data or data in path.parents:
+        rescued = data / "mdb-rescue-jobs"  # MDB Rescue's results are meant to be opened here
+        if (path == data or data in path.parents) and rescued not in path.parents:
             raise DataError("Files inside varsha's data folder (server databases, credentials) can't be opened here")
         if not (is_sqlite(path) or is_access(path) or (path.suffix.lower() in CSV_EXTENSIONS and looks_like_text(path))):
             raise DataError(f"{path.name} isn't a SQLite, Access or CSV file (a .db file can also be Paradox or another format)")

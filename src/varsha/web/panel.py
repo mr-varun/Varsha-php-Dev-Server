@@ -31,6 +31,7 @@ from varsha.php.errors import PhpErrorWatcher
 from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
+from varsha.data.rescue import RescueManager
 from varsha.data.sqlite_files import DataFiles
 from varsha.services.importer import Importer
 from varsha.services.manager import ServiceManager
@@ -111,6 +112,7 @@ class PanelApp:
                              dns_route=self.dns_route_active)
         self.git = SiteGit()
         self.data = DataFiles(paths)
+        self.rescue = RescueManager(paths, notify=lambda data: self.events.publish("rescue", data))
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -268,7 +270,33 @@ class PanelApp:
                                     "CSV / TSV (*.csv *.tsv *.tab *.txt);;All files (*)")
         return self.data.register(chosen) if chosen else None
 
+    # ------------------------------------------------------------------ MDB Rescue
+
+    def pick_rescue_file(self) -> dict[str, Any] | None:
+        if self.folder_picker is None:
+            raise ServiceError("The file dialog isn't available")
+        chosen = self.folder_picker("Choose the damaged Access database", "file",
+                                    "Access databases (*.mdb *.mde);;Disk images and fragments (*.img *.bin *.dd *.raw *.001);;"
+                                    "All files (*)")
+        return self.rescue.register(chosen) if chosen else None
+
+    def rescue_listing(self) -> dict[str, Any]:
+        return {**self.rescue.status(), "recent": self.rescue.recent(), "jobs": self.rescue.jobs(),
+                "databases": [{"id": s.id, "name": s.name, "port": s.ports[0] if s.ports else None,
+                               "running": s.state.value == "running"}
+                              for s in self.manager.statuses() if s.is_database]}
+
+    def rescue_to_data(self, job: str, key: str) -> dict[str, Any]:
+        """Open a rescue result (recovered .sqlite, rebuilt or repaired .mdb) on the Data page."""
+        if key not in ("recovered_sqlite", "rebuilt_mdb", "repaired_mdb"):
+            raise ValueError("That result can't be opened on the Data page")
+        return self.data.register(str(self.rescue.output_path(job, key)))
+
+    def rescue_import(self, job: str, service_id: str, database: str) -> str:
+        return self.databases.import_into(service_id, self.rescue.output_path(job, "sql_dump"), database)
+
     def shutdown(self) -> None:
+        self.rescue.shutdown()
         self.php_errors.stop()
         self.scheduler.stop()
         self.mail_watch.stop()

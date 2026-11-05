@@ -986,3 +986,59 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
   .data-head-side { align-items: flex-start; }
   .data-form { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------------ MDB Rescue */
+
+.rescue-card { margin-bottom: var(--s4); }
+.rescue-step {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: 8px;
+  background: var(--yellow); border: var(--line-thin); border-radius: 50%; font-size: 14px; vertical-align: 2px;
+}
+.rescue-pick { margin-bottom: var(--s3); }
+.kinds.kinds-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.rescue-card label.kind {
+  position: relative; display: flex; flex-direction: column; gap: 4px; padding: var(--s3); background: var(--paper);
+  border: var(--line); border-radius: var(--radius-sm); cursor: pointer;
+}
+.rescue-card label.kind:has(input:checked) { background: var(--yellow); box-shadow: var(--shadow-xs); }
+.rescue-card label.kind:has(input:disabled) { opacity: .55; cursor: not-allowed; }
+.rescue-options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s4); margin-top: var(--s4); }
+.rescue-options-label { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.rescue-password { min-height: 36px; width: auto; flex: 0 1 300px; margin-left: auto; }
+.rescue-go { margin-top: var(--s4); gap: var(--s3); }
+.rescue-start { min-height: 46px; padding: 8px 22px; font-size: 16px; }
+.rescue-progress { display: grid; grid-template-columns: minmax(260px, 380px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.rescue-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.rescue-stage { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: var(--line-thin); border-color: transparent; border-radius: var(--radius-sm); }
+.rescue-stage small { color: var(--muted); font-weight: 600; }
+.rescue-stage.active { background: var(--paper); border-color: var(--edge); }
+.rescue-stage.done { color: var(--muted); }
+.rescue-mark { display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; border: var(--line-thin); border-radius: 50%; font-size: 12px; background: var(--card); }
+.rescue-stage.done .rescue-mark { background: var(--mint); color: var(--text); }
+.rescue-stage.active .rescue-mark { background: var(--yellow); }
+.rescue-bar { width: 90px; height: 10px; border: var(--line-thin); border-radius: 999px; background: var(--paper-2); overflow: hidden; flex: none; }
+.rescue-fill { display: block; height: 100%; width: 0; background: var(--mint); transition: width .3s; }
+.rescue-log pre { max-height: 360px; min-height: 200px; margin: 0; font-size: 12px; }
+.rescue-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s3); margin-bottom: var(--s4); }
+.rescue-tile { padding: var(--s3) var(--s4); background: var(--paper); border: var(--line); border-radius: var(--radius-sm); box-shadow: var(--shadow-xs); }
+.rescue-tile b { display: block; font-size: 26px; line-height: 1.1; }
+.rescue-tile small { color: var(--muted); font-weight: 700; }
+.rescue-tile.good { background: var(--mint); }
+.rescue-tile.bad { background: var(--coral-soft); }
+.rescue-verdict { margin: 0 0 var(--s3); }
+.rescue-warnings { margin-bottom: var(--s3); }
+.rescue-actions { margin-bottom: var(--s4); gap: var(--s2); }
+.rescue-bad { color: var(--coral); font-weight: 800; }
+.rescue-joblist { display: flex; flex-direction: column; gap: 6px; }
+.rescue-job {
+  display: flex; align-items: center; gap: var(--s3); padding: 9px 14px; background: var(--card); color: var(--text);
+  border: var(--line-thin); border-radius: var(--radius-sm); text-align: left; cursor: pointer; font: inherit;
+}
+.rescue-job:hover { box-shadow: var(--shadow-xs); }
+.rescue-job.is-open { background: var(--yellow); }
+@media (max-width: 1100px) { .kinds.kinds-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 960px) {
+  .rescue-progress { grid-template-columns: 1fr; }
+  .rescue-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rescue-password { margin-left: 0; }
+}

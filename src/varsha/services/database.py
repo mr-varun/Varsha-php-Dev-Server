@@ -123,6 +123,33 @@ class DatabaseTools:
             raise ServiceError(f"Restore failed: {_clean(message)}", service_id)
         logger.info("Restored %s into %s", sql_file, service_id)
 
+    def import_into(self, service_id: str, sql_file: Path, database: str) -> str:
+        """Load a dump without CREATE DATABASE (e.g. MDB Rescue's .sql) into a NEW database.
+        An existing database is never reused, so nothing that's already there can be overwritten."""
+        if not DB_NAME_RE.fullmatch(database):
+            raise ServiceError(f"Not a database name: {database}", service_id)
+        if database.lower() in (d.lower() for d in self.list_databases(service_id)) or database.lower() in SYSTEM_DATABASES:
+            raise ServiceError(f"A database named {database} already exists: choose another name", service_id)
+        port = self._require_running(service_id)
+        client = self.manager.expand_tool(service_id, "client")
+        if not sql_file.is_file():
+            raise ServiceError(f"{sql_file} not found", service_id)
+        with client_option_file(port, self.manager.credentials.get(service_id)) as cnf:
+            base = [str(client), f"--defaults-extra-file={cnf.as_posix()}", "--default-character-set=utf8mb4"]
+            created = proc_utils.run_quiet([*base, "-e", f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 "
+                                            "COLLATE utf8mb4_unicode_ci"], timeout=60)
+            if created.returncode != 0:
+                raise ServiceError(f"Couldn't create {database}: {_clean(created.stderr or created.stdout)}", service_id)
+            with open(sql_file, "rb") as source:
+                result = subprocess.run([*base, database], stdin=source, capture_output=True, timeout=None,
+                                        creationflags=proc_utils.CREATE_NO_WINDOW)
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout).decode("utf-8", errors="replace")
+            raise ServiceError(f"Import into {database} failed (the database was created and is left for a look): "
+                               f"{_clean(message)}", service_id)
+        logger.info("Imported %s into %s.%s", sql_file, service_id, database)
+        return f"Imported into {database} on {self.manager.definition(service_id).name}"
+
     def heidisql_args(self, service_id: str) -> list[str]:
         """Command-line arguments that open HeidiSQL straight on this server."""
         defn = self.manager.definition(service_id)
