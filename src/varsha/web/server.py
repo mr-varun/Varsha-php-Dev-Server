@@ -521,7 +521,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"path": app.pick_folder(str(body.get("title") or "Choose a folder"))})
         elif path == "/api/create":
             kind, name = str(body.get("kind", "")), str(body.get("name", "")).strip().lower()
-            db = str(body.get("db") or "") or None
+            # a linked project already has its own database settings: never create one for it
+            db = None if kind == "link" else (str(body.get("db") or "") or None)
             php = str(body.get("php") or "") or None
             source = str(body.get("source") or "") or None
             if kind == "link":

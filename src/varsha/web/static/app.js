@@ -1649,7 +1649,7 @@ function createDialog() {
     <div class="form-row even">
       <label>PHP<select class="select" name="php"><option value="">Default (${esc(def ? def.version : "?")})</option>
         ${usablePhp().map((p) => `<option value="${esc(p.version)}">${esc(p.label)}</option>`).join("")}</select></label>
-      <label class="grow">Database<select class="select" name="db"><option value="">No database</option>
+      <label class="grow not-link">Database<select class="select" name="db"><option value="">No database</option>
         ${running.map((s) => `<option value="${esc(s.id)}" ${s.type === "mariadb" ? "selected" : ""}>${esc(s.name)} (:${s.ports[0]})</option>`).join("")}</select>
         ${running.length ? "" : '<small class="muted">Start a database to create one for the site.</small>'}</label>
     </div>
@@ -1657,7 +1657,8 @@ function createDialog() {
     <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button><button class="btn btn-yellow" value="ok">Create site</button></div>`,
   async (form) => {
     const kind = form.get("kind");
-    await api.post("/api/create", { kind, name: form.get("name"), php: form.get("php"), db: form.get("db"),
+    // a linked project brings its own code and database settings: no database is created for it
+    await api.post("/api/create", { kind, name: form.get("name"), php: form.get("php"), db: kind === "link" ? "" : form.get("db"),
       source: kind === "link" ? form.get("source") : "" });
     toast({ ok: true, title: "Creating\u2026", message: kind === "link" ? "The site appears in a second." : "Follow along in Logs \u2192 Quick Create." });
   });
@@ -1675,6 +1676,7 @@ function createDialog() {
     const link = form.elements.kind.value === "link";
     linkRow.hidden = !link;
     source.required = link;
+    form.querySelector(".not-link").hidden = link;
   };
   form.querySelectorAll('input[name="kind"]').forEach((r) => r.addEventListener("change", sync));
   form.querySelector("[data-pick-folder]").addEventListener("click", async (event) => {
