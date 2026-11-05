@@ -108,6 +108,33 @@ code, .mono { font-family: var(--mono); font-size: .86em; }
   min-width: 20px; padding: 0 6px; background: var(--yellow); color: var(--text);
   border: var(--line-thin); border-radius: 999px; font-size: 11px; text-align: center;
 }
+/* Tools / System: menus for the pages that aren't daily use */
+.nav-group { position: relative; }
+.nav-item.nav-parent::after { content: "\25be"; font-size: 12px; margin-left: 2px; }
+.nav-item.nav-parent.has-current { background: var(--yellow); border-color: var(--edge); }
+.nav-item.nav-parent.is-open { background: var(--inverse); color: var(--inverse-text); border-color: var(--edge); }
+.nav-menu {
+  position: absolute; top: calc(100% + 10px); left: 0; z-index: 40; min-width: 270px; padding: 6px;
+  background: var(--card); border: var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.nav-menu[hidden] { display: none; }
+.nav-menu-item {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 8px 10px; border: var(--line-thin); border-color: transparent; border-radius: var(--radius-sm);
+  background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.nav-menu-item:hover { border-color: var(--edge); background: var(--paper); }
+.nav-menu-item[aria-current="page"] { background: var(--inverse); color: var(--inverse-text); }
+.nav-menu-item[aria-current="page"] small { color: inherit; opacity: .8; }
+.nav-menu-icon {
+  display: grid; place-items: center; width: 30px; height: 30px; border: var(--line-thin); border-radius: 8px;
+  background: var(--paper); font-weight: 800; color: var(--text);
+}
+.nav-menu-item[aria-current="page"] .nav-menu-icon { background: var(--yellow); }
+.nav-menu-item b { display: block; font-size: 14.5px; }
+.nav-menu-item small { display: block; color: var(--muted); font-size: 12px; font-weight: 600; }
+.nav-menu-sep { height: 0; border-top: var(--line-thin); margin: 4px 6px; opacity: .25; }
 .topbar-spacer { flex: 1; }
 .topbar-actions { display: flex; gap: var(--s2); flex-wrap: wrap; }
 

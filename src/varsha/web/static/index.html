@@ -20,17 +20,30 @@
         </span>
       </a>
       <nav class="nav" id="nav" aria-label="Sections">
+        <!-- daily use: always visible -->
         <button class="nav-item" data-view="stack" title="Stack (1)">Stack</button>
         <button class="nav-item" data-view="sites" title="Sites (2)">Sites</button>
         <button class="nav-item" data-view="databases" title="Databases (3)">Databases</button>
-        <button class="nav-item" data-view="data" title="Data: SQLite, Access and CSV files">Data</button>
         <button class="nav-item" data-view="mail" title="Mail (4)">Mail</button>
         <button class="nav-item" data-view="errors" title="PHP errors (5)">Errors</button>
-        <button class="nav-item" data-view="tasks" title="Tasks (6)">Tasks</button>
-        <button class="nav-item" data-view="share" title="Share (7)">Share</button>
         <button class="nav-item" data-view="logs" title="Logs (8)">Logs</button>
-        <button class="nav-item" data-view="system" title="System (9)">System</button>
-        <button class="nav-item" data-view="doctor" title="Doctor: check everything (0)">Doctor</button>
+        <!-- the rest, grouped -->
+        <div class="nav-group">
+          <button class="nav-item nav-parent" data-nav-menu="tools" aria-haspopup="true" aria-expanded="false"><span class="nav-parent-label">Tools</span></button>
+          <div class="nav-menu" id="nav-menu-tools" role="menu" hidden>
+            <button class="nav-menu-item" data-view="data" role="menuitem"><span class="nav-menu-icon">&#9638;</span><span><b>Data</b><small>SQLite, Access and CSV files</small></span></button>
+            <div class="nav-menu-sep"></div>
+            <button class="nav-menu-item" data-view="tasks" role="menuitem" title="Tasks (6)"><span class="nav-menu-icon">&#9719;</span><span><b>Tasks</b><small>scheduled commands (cron)</small></span></button>
+            <button class="nav-menu-item" data-view="share" role="menuitem" title="Share (7)"><span class="nav-menu-icon">&#8599;</span><span><b>Share</b><small>internet link and LAN</small></span></button>
+          </div>
+        </div>
+        <div class="nav-group">
+          <button class="nav-item nav-parent" data-nav-menu="system" aria-haspopup="true" aria-expanded="false"><span class="nav-parent-label">System</span></button>
+          <div class="nav-menu" id="nav-menu-system" role="menu" hidden>
+            <button class="nav-menu-item" data-view="system" role="menuitem" title="System (9)"><span class="nav-menu-icon">&#9881;</span><span><b>System</b><small>PHP, HTTPS, DNS, folders</small></span></button>
+            <button class="nav-menu-item" data-view="doctor" role="menuitem" title="Doctor (0)"><span class="nav-menu-icon">+</span><span><b>Doctor</b><small>check the whole setup</small></span></button>
+          </div>
+        </div>
       </nav>
       <span class="topbar-spacer"></span>
       <div id="meter"></div>

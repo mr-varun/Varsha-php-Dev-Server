@@ -17,6 +17,7 @@ const VIEWS = {
   system: { title: "System", eyebrow: "php \u00b7 https \u00b7 dns \u00b7 folders" },
   doctor: { title: "Doctor", eyebrow: "check everything \u00b7 one click" },
 };
+const SHORTCUTS = ["stack", "sites", "databases", "mail", "errors", "tasks", "share", "logs", "system", "doctor"];  // keys 1-9, 0
 const BUSY = new Set(["starting", "stopping"]);
 const OFF = new Set(["missing", "disabled"]);
 const LOCK = "\ud83d\udd12";
@@ -167,13 +168,30 @@ const lanShare = (domain) => ((S.lan && S.lan.shares) || []).find((s) => s.domai
 
 // ---------------------------------------------------------------- shell
 
+function navBadge(name) {
+  return { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length + ((S.lan && S.lan.shares) || []).length, mail: S.mail.unread,
+           tasks: (S.tasks || []).filter((t) => t.enabled && t.last_ok === false).length,
+           errors: S.php_errors ? S.php_errors.unseen_errors + S.php_errors.unseen_warnings : 0 }[name] || 0;
+}
+
 function renderShell() {
-  document.querySelectorAll(".nav-item").forEach((b) => {
+  // page links: the top-level buttons and the items inside the Tools / System menus
+  document.querySelectorAll(".nav-item[data-view], .nav-menu-item").forEach((b) => {
     if (b.dataset.view === view) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     b.querySelector(".nav-badge")?.remove();
-    const n = { sites: S.sites.length, share: S.tunnels.filter((t) => t.public_url).length + ((S.lan && S.lan.shares) || []).length, mail: S.mail.unread,
-                tasks: (S.tasks || []).filter((t) => t.enabled && t.last_ok === false).length,
-                errors: S.php_errors ? S.php_errors.unseen_errors + S.php_errors.unseen_warnings : 0 }[b.dataset.view];
+    const n = navBadge(b.dataset.view);
+    if (n) b.insertAdjacentHTML("beforeend", `<span class="nav-badge">${n}</span>`);
+  });
+  // menu buttons: "Tools: Data" while you're on a page inside, and the sum of their pages' badges
+  // (sites is a count, not news, so it isn't summed into a menu)
+  document.querySelectorAll(".nav-parent").forEach((b) => {
+    const items = [...document.querySelectorAll(`#nav-menu-${b.dataset.navMenu} .nav-menu-item`)];
+    const current = items.find((i) => i.dataset.view === view);
+    const base = b.dataset.navMenu === "tools" ? "Tools" : "System";
+    b.querySelector(".nav-parent-label").textContent = current ? `${base}: ${VIEWS[view].title}` : base;
+    b.classList.toggle("has-current", Boolean(current));
+    b.querySelector(".nav-badge")?.remove();
+    const n = items.reduce((sum, i) => sum + navBadge(i.dataset.view), 0);
     if (n) b.insertAdjacentHTML("beforeend", `<span class="nav-badge">${n}</span>`);
   });
   $("#page-head").hidden = view === "stack";
@@ -1492,10 +1510,32 @@ function scheduleRefresh() {
   refreshTimer = setTimeout(refresh, 120);
 }
 
+// ---------------------------------------------------------------- Tools / System menus in the top bar
+
+function setNavMenu(name) {
+  document.querySelectorAll(".nav-parent").forEach((b) => {
+    const open = b.dataset.navMenu === name;
+    b.classList.toggle("is-open", open);
+    b.setAttribute("aria-expanded", String(open));
+    document.getElementById(`nav-menu-${b.dataset.navMenu}`).hidden = !open;
+  });
+}
+
+document.addEventListener("click", (event) => {
+  const parent = event.target.closest("[data-nav-menu]");
+  if (parent) {
+    event.preventDefault();
+    setNavMenu(parent.classList.contains("is-open") ? null : parent.dataset.navMenu);
+  } else if (!event.target.closest(".nav-menu")) {
+    setNavMenu(null);  // a click anywhere else closes an open menu
+  }
+});
+
 function go(next) {
   if (!VIEWS[next]) return;
   view = next;
   openMenu = null;
+  setNavMenu(null);
   history.replaceState(null, "", `#${next}`);
   $("#view").innerHTML = "";
   render();
@@ -1927,9 +1967,10 @@ document.addEventListener("toggle", (event) => {
 }, true);
 
 document.addEventListener("keydown", (event) => {
-  if (event.target.closest("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "Escape") setNavMenu(null);  // also while typing in a field
+  if (event.target.closest?.("input, textarea, select, dialog") || event.ctrlKey || event.metaKey || event.altKey) return;
   const index = "1234567890".indexOf(event.key);
-  if (index >= 0) go(Object.keys(VIEWS).filter((k) => k !== "data")[index]);  // keys 1-0 stay as they were
+  if (index >= 0) go(SHORTCUTS[index]);  // keys 1-0 stay as they were before the menus
   if (event.key === "Escape" && openMenu) { openMenu = null; render(); }
 });
 
