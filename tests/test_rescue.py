@@ -27,6 +27,14 @@ def run_pipeline(file, out=None, password=None, csv_out=True, job_hook=None, ech
     job = Job()
     job.dir = Path(out) / ("job-20261105-120000-" + Path(file).stem)
     job.dir.mkdir(parents=True)
+    import os, stat
+    (job.dir / "source").mkdir()
+    (job.dir / "source" / Path(file).name).write_bytes(b"x" * 5000)
+    os.chmod(job.dir / "source" / Path(file).name, stat.S_IREAD)  # the real tool marks its copy read-only
+    (job.dir / "2-repair").mkdir()
+    (job.dir / "2-repair" / "attempt.mdb").write_bytes(b"y" * 9000)
+    (job.dir / "csv").mkdir()
+    (job.dir / "csv" / "t.csv").write_text("id\n1\n", encoding="utf-8")
     job.cancel_event = None
     job.listeners, job.progress_listeners = [], []
     job_hook(job)
@@ -72,7 +80,7 @@ def wait_done(mgr: RescueManager, timeout: float = 30) -> dict:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         run = mgr.status()["run"]
-        if run and run["status"] != "running":
+        if run and run["status"] != "running" and run.get("settled"):
             return run
         time.sleep(0.05)
     raise AssertionError("the rescue never finished")
@@ -134,6 +142,44 @@ def test_files_and_setup_are_checked(manager: RescueManager, tmp_path: Path) -> 
         manager.start("0" * 16, "recommended", {})
     empty = RescueManager(AppPaths(tmp_path / "empty"))
     assert "isn't in bin" in empty.available()
+
+
+def test_nothing_is_deleted_until_the_user_cleans(manager: RescueManager, tmp_path: Path) -> None:
+    damaged = tmp_path / "bank.mdb"
+    damaged.write_bytes(b"x")
+    manager.start(manager.register(str(damaged))["id"], "recommended", {"sql": True})
+    run = wait_done(manager)
+    folder = manager.jobs_dir / run["job"]
+    everything = sorted(p.name for p in folder.iterdir())
+    assert "source" in everything and "2-repair" in everything  # the job is left complete
+    [job] = manager.jobs()
+    assert job["working"] == 5000 + 9000 and job["size"] > job["working"]
+    # Clean: keep the rescued files, remove the rest
+    assert "14 KB" not in manager.clean_job(run["job"])
+    assert sorted(p.name for p in folder.iterdir()) == ["bank.sql", "bank_recovered.sqlite", "csv", "log.txt", "report.json"]
+    assert manager.jobs()[0]["working"] == 0
+    assert manager.clean_job(run["job"]).startswith("Nothing to clean")
+    assert manager.job(run["job"])["outputs"]  # the results still open
+    # Full clean: the whole job
+    assert "deleted completely" in manager.delete_job(run["job"]) and not folder.exists()
+    assert damaged.read_bytes() == b"x"  # the original is never touched
+    with pytest.raises(RescueError):
+        manager.clean_job(run["job"])
+
+
+def test_a_running_job_cant_be_cleaned(manager: RescueManager, tmp_path: Path) -> None:
+    slow = tmp_path / "slow.mdb"
+    slow.write_bytes(b"x")
+    manager.start(manager.register(str(slow))["id"], "recommended", {"sql": True, "mdb": True})
+    deadline = time.monotonic() + 20
+    while not (manager.status()["run"] or {}).get("job") and time.monotonic() < deadline:
+        time.sleep(0.05)
+    job = manager.status()["run"]["job"]
+    for action in (manager.clean_job, manager.delete_job):
+        with pytest.raises(RescueError, match="still running"):
+            action(job)
+    manager.stop()
+    wait_done(manager)
 
 
 def test_results_open_on_the_data_page(manager: RescueManager, tmp_path: Path) -> None:

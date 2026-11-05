@@ -187,11 +187,26 @@ function renderRescueJobs() {
   if (!box || !RES.listing) return;
   const jobs = RES.listing.jobs;
   if (!jobs.length) { box.innerHTML = ""; return; }
-  box.innerHTML = `<h2 class="section-title">Earlier rescues</h2><div class="rescue-joblist">${jobs.map((j) => `<button class="rescue-job${RES.job && RES.job.job === j.job ? " is-open" : ""}"
-      data-r="job" data-job="${esc(j.job)}"><b>${esc(j.source)}</b>
-      <span class="chip ${j.status === "completed" ? "chip-mint" : j.status === "running" ? "chip-blue" : "chip-coral"}">${esc(j.status)}</span>
+  const working = RES.listing.jobs_working || 0;
+  box.innerHTML = `<h2 class="section-title">Rescue jobs</h2>
+    <p class="muted rescue-jobs-note">${plural(jobs.length, "job")} use <b>${fmtBytes(RES.listing.jobs_size || 0)}</b>${working
+      ? `, of which <b>${fmtBytes(working)}</b> are working files (the tool's copies and stage folders) that <b>Clean</b> removes` : ""}.
+      Nothing is deleted unless you choose it.</p>
+    <div class="rescue-joblist">${jobs.map((j) => {
+      const busy = j.status === "running";
+      return `<div class="rescue-job${RES.job && RES.job.job === j.job ? " is-open" : ""}">
+      <button class="rescue-job-open" data-r="job" data-job="${esc(j.job)}" title="Show its results"><b>${esc(j.source)}</b>
+      <span class="chip ${j.status === "completed" ? "chip-mint" : busy ? "chip-blue" : "chip-coral"}">${esc(j.status)}</span>
       <span class="muted">${j.rows_found === null || j.rows_found === undefined ? "" : `${Number(j.rows_recovered || 0).toLocaleString()} / ${Number(j.rows_found).toLocaleString()} rows`}</span>
-      <span class="grow"></span><small class="muted">${esc(fmtDate(j.modified))}</small></button>`).join("")}</div>`;
+      <span class="grow"></span><small class="muted">${fmtBytes(j.size || 0)} · ${esc(fmtDate(j.modified))}</small></button>
+      <div class="row rescue-job-actions">
+        <button class="btn btn-sm" data-r="browse-job" data-job="${esc(j.job)}" title="Open the job folder in Explorer">Browse</button>
+        <button class="btn btn-sm btn-mint" data-r="clean-job" data-job="${esc(j.job)}" ${busy || !j.working ? "disabled" : ""}
+          title="Keep the rescued files (results, report, log); remove the working copies">Clean${j.working ? ` (${fmtBytes(j.working)})` : ""}</button>
+        <button class="btn btn-sm btn-coral" data-r="delete-job" data-job="${esc(j.job)}" ${busy ? "disabled" : ""}
+          title="Delete the whole job, rescued files included">Full clean</button>
+      </div></div>`;
+    }).join("")}</div>`;
 }
 
 // ---------------------------------------------------------------- events
@@ -242,6 +257,20 @@ document.addEventListener("click", async (event) => {
       DATA.file = { id: file.id };  // data.js opens it when its page renders
       go("data");
     } else if (r === "import") { importDialog(); }
+    else if (r === "browse-job") { await api.post(`/api/rescue/job/${encodeURIComponent(el.dataset.job)}/open`, { what: "folder" }); }
+    else if (r === "clean-job") {
+      toast({ ok: true, title: "MDB Rescue", message: (await api.post(`/api/rescue/job/${encodeURIComponent(el.dataset.job)}/clean`, {})).message });
+      await loadRescue(); renderRescueJobs();
+      if (RES.job && RES.job.job === el.dataset.job) await showRescueJob(el.dataset.job);
+    } else if (r === "delete-job") {
+      const job = el.dataset.job;
+      confirmDialog("Full clean: delete this whole job?", "Everything in it goes, the rescued files (.sql, recovered and rebuilt files, report) too. Your original file is not touched.",
+        "Full clean", async () => {
+          toast({ ok: true, title: "MDB Rescue", message: (await api.post(`/api/rescue/job/${encodeURIComponent(job)}/delete`, {})).message });
+          if (RES.job && RES.job.job === job) { RES.job = null; renderRescueResult(); }
+          await loadRescue(); renderRescueJobs();
+        });
+    }
   } catch (err) {
     toast({ ok: false, title: "MDB Rescue", message: err.message });
   } finally {

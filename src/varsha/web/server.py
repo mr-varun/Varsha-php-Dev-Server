@@ -526,9 +526,13 @@ class PanelHandler(BaseHTTPRequestHandler):
         elif path == "/api/rescue/forget":
             app.rescue.forget(str(body.get("file") or ""))
             self._json(HTTPStatus.OK, {"ok": True})
-        elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})/(open|data|import)", path):
+        elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})/(open|data|import|clean|delete)", path):
             job, action = m.group(1), m.group(2)
-            if action == "open":
+            if action == "clean":
+                self._json(HTTPStatus.OK, {"message": app.rescue.clean_job(job)})
+            elif action == "delete":
+                self._json(HTTPStatus.OK, {"message": app.rescue.delete_job(job)})
+            elif action == "open":
                 self._json(HTTPStatus.OK, {"message": app.rescue.open(job, str(body.get("what") or "folder"))})
             elif action == "data":
                 self._json(HTTPStatus.OK, {"file": app.rescue_to_data(job, str(body.get("key") or ""))})

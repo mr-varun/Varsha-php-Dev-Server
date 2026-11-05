@@ -281,7 +281,9 @@ class PanelApp:
         return self.rescue.register(chosen) if chosen else None
 
     def rescue_listing(self) -> dict[str, Any]:
-        return {**self.rescue.status(), "recent": self.rescue.recent(), "jobs": self.rescue.jobs(),
+        jobs = self.rescue.jobs()
+        return {**self.rescue.status(), "recent": self.rescue.recent(), "jobs": jobs,
+                "jobs_size": sum(j["size"] for j in jobs), "jobs_working": sum(j["working"] for j in jobs),
                 "databases": [{"id": s.id, "name": s.name, "port": s.ports[0] if s.ports else None,
                                "running": s.state.value == "running"}
                               for s in self.manager.statuses() if s.is_database]}

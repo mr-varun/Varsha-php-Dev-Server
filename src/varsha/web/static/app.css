@@ -1031,10 +1031,16 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .rescue-bad { color: var(--coral); font-weight: 800; }
 .rescue-joblist { display: flex; flex-direction: column; gap: 6px; }
 .rescue-job {
-  display: flex; align-items: center; gap: var(--s3); padding: 9px 14px; background: var(--card); color: var(--text);
-  border: var(--line-thin); border-radius: var(--radius-sm); text-align: left; cursor: pointer; font: inherit;
+  display: flex; align-items: center; gap: var(--s2); padding: 3px 8px 3px 0; background: var(--card); color: var(--text);
+  border: var(--line-thin); border-radius: var(--radius-sm);
 }
 .rescue-job:hover { box-shadow: var(--shadow-xs); }
+.rescue-jobs-note { margin: 0 0 var(--s3); }
+.rescue-job-actions { flex: none; gap: 6px; }
+.rescue-job-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--s3); padding: 6px 12px;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
 .rescue-job.is-open { background: var(--yellow); }
 @media (max-width: 1100px) { .kinds.kinds-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 960px) {

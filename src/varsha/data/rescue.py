@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import stat
 import subprocess
 import threading
 import time
@@ -48,6 +50,53 @@ STAGE_ORDER = list(STAGE_NAMES)
 
 class RescueError(ValueError):
     pass
+
+
+# Clean-up is the user's choice, per job, from the job list ("Clean"): nothing is deleted on its own.
+# Cleaning removes a finished job's working folders (the tool's copy of the original in source\,
+# numbered stage folders like 2-repair\, and work\ / tables\) and keeps the results at the top of
+# the job folder (.sql, .sqlite, rebuilt .mdb, csv\, report, log). The same rule for every rescue tool.
+WORKING_DIRS = re.compile(r"^(\d+-.+|source|work|tables)$", re.IGNORECASE)
+
+
+def working_size(folder: Path) -> int:
+    """Bytes a Clean would free."""
+    try:
+        return sum(tree_size(c) for c in folder.iterdir() if c.is_dir() and WORKING_DIRS.match(c.name))
+    except OSError:
+        return 0
+
+
+def tree_size(path: Path) -> int:
+    total = 0
+    for dirpath, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += (Path(dirpath) / name).stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def remove_tree(path: Path) -> None:
+    def writable(func: Callable[..., Any], target: str, _exc: Any) -> None:
+        os.chmod(target, stat.S_IWRITE)  # the tools mark their source copy read-only
+        func(target)
+    shutil.rmtree(path, onerror=writable)
+
+
+def prune_job(folder: Path) -> int:
+    """Delete a finished job's working folders; returns the bytes freed."""
+    freed = 0
+    for child in folder.iterdir():
+        if child.is_dir() and WORKING_DIRS.match(child.name):
+            size = tree_size(child)
+            try:
+                remove_tree(child)
+                freed += size
+            except OSError as exc:
+                logger.warning("Couldn't remove %s: %s", child, exc)
+    return freed
 
 
 def find_tool(paths: AppPaths) -> Path | None:
@@ -227,6 +276,8 @@ class RescueManager:
                 if code:
                     self._run["error"] = self._run["error"] or f"the rescue tool stopped unexpectedly (exit {code})"
             self._run["finished"] = time.time() if self._run else None
+            if self._run is not None:
+                self._run["settled"] = True  # the tool's process is gone: the job folder won't change any more
         logger.info("MDB rescue finished: %s", self._run["status"] if self._run else "?")
         self._push(force=True)
 
@@ -290,12 +341,34 @@ class RescueManager:
             report = self._report(folder)
             totals = report.get("totals") or {}
             out.append({"job": folder.name, "source": Path(str(report.get("source") or "")).name or folder.name,
+                        "size": tree_size(folder), "working": working_size(folder),
                         "status": report.get("status") or ("running" if self._is_current(folder) else "unknown"),
                         "started": report.get("started") or "", "tables": totals.get("tables"),
                         "rows_found": totals.get("rows_found"), "rows_recovered": totals.get("rows_recovered"),
                         "percent": totals.get("percent"), "rows_damaged": totals.get("rows_damaged"),
                         "modified": folder.stat().st_mtime})
         return out
+
+    def _finished_dir(self, job: str) -> Path:
+        folder = self.job_dir(job)
+        if self._is_current(folder):
+            raise RescueError("This rescue is still running: stop it first")
+        return folder
+
+    def clean_job(self, job: str) -> str:
+        """Keep the rescued files (results, report, log), remove the rest (working copies)."""
+        folder = self._finished_dir(job)
+        freed = prune_job(folder)
+        if not freed:
+            return "Nothing to clean: only the rescued files are left"
+        return f"Working files removed, the rescued files stay ({freed / 1048576:.0f} MB freed)"
+
+    def delete_job(self, job: str) -> str:
+        """Full clean: the whole job folder, rescued files included."""
+        folder = self._finished_dir(job)
+        size = tree_size(folder)
+        remove_tree(folder)
+        return f"Job deleted completely ({size / 1048576:.0f} MB freed). Your original file is untouched."
 
     def _is_current(self, folder: Path) -> bool:
         with self._lock:
