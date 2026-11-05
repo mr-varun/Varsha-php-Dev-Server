@@ -543,6 +543,10 @@ class PanelHandler(BaseHTTPRequestHandler):
                 errors.set_notify(str(body.get("notify", "")))
             app.events.publish("state")
             self._json(HTTPStatus.OK, {"ok": True})
+        elif path == "/api/php-errors/ignore-site":
+            message = app.php_errors.set_site_ignored(str(body.get("site") or ""), body.get("ignore") is True)
+            app.events.publish("state")
+            self._json(HTTPStatus.OK, {"message": message})
         elif m := re.fullmatch(r"/api/php-errors/([0-9a-f]{12})/(dismiss|mute|unmute|open)", path):
             gid, action = m.group(1), m.group(2)
             message = "ok"

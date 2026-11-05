@@ -101,7 +101,7 @@ def test_notify_level_and_mute(tmp_path: Path) -> None:
     h.watcher.poll()
     assert h.events[-1]["new"] == []  # muted
     again = PhpErrorWatcher(h.logs, tmp_path / "config" / "php-errors.json", site_roots=lambda: [], on_event=lambda e: None)
-    assert again.settings == {"notify": "warnings", "muted": [fatal_id]}  # settings persist
+    assert again.settings == {"notify": "warnings", "muted": [fatal_id], "ignored_sites": []}  # settings persist
     with pytest.raises(ValueError):
         h.watcher.set_notify("loud")
 
@@ -117,6 +117,34 @@ def test_site_is_found_through_a_junction_to_public(tmp_path: Path) -> None:
     h.watcher.poll()
     sites = {g["message"]: g["site"] for g in h.watcher.groups()}
     assert sites == {"oops": "admin.test", "elsewhere": ""}  # code above public\ still belongs to the site
+
+
+def test_one_site_can_be_ignored(tmp_path: Path) -> None:
+    banks = tmp_path / "Projects" / "billing"
+    shop = tmp_path / "Websites" / "Shop"
+    banks.mkdir(parents=True)
+    shop.mkdir(parents=True)
+    h = Harness(tmp_path, sites=[("banks.test", banks), ("shop.test", shop)])
+    h.watcher.poll(history=True)
+    h.write(f"[04-Nov-2026 11:00:00 UTC] PHP Fatal error:  old bank bug in {banks / 'index.php'} on line 4")
+    h.watcher.poll()
+    assert [g["site"] for g in h.watcher.groups()] == ["banks.test"]
+    assert "ignored" in h.watcher.set_site_ignored("Banks.test", True)
+    assert h.watcher.groups() == []  # what it already logged is cleared
+    h.write(f"[04-Nov-2026 11:00:01 UTC] PHP Fatal error:  new bank bug in {banks / 'index.php'} on line 9")
+    h.write(f"[04-Nov-2026 11:00:02 UTC] PHP Fatal error:  shop bug in {shop / 'cart.php'} on line 3")
+    h.watcher.poll()
+    assert [g["site"] for g in h.watcher.groups()] == ["shop.test"]  # only that site is skipped
+    assert [g["message"] for g in h.events[-1]["new"]] == ["shop bug"]  # and it never alerts
+    assert h.watcher.summary()["ignored_sites"] == ["banks.test"]
+    again = PhpErrorWatcher(h.logs, tmp_path / "config" / "php-errors.json", site_roots=lambda: [], on_event=lambda e: None)
+    assert again.settings["ignored_sites"] == ["banks.test"]  # remembered
+    h.watcher.set_site_ignored("banks.test", False)
+    h.write(f"[04-Nov-2026 11:00:03 UTC] PHP Fatal error:  bank bug again in {banks / 'index.php'} on line 9")
+    h.watcher.poll()
+    assert {g["site"] for g in h.watcher.groups()} == {"banks.test", "shop.test"}
+    with pytest.raises(ValueError):
+        h.watcher.set_site_ignored("../x", True)
 
 
 def test_partial_lines_wait_and_rotated_logs_restart(tmp_path: Path) -> None:

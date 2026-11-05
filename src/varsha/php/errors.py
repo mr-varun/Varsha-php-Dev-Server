@@ -44,6 +44,7 @@ NOTIFY_LEVELS = {"errors": ("error",), "warnings": ("error", "warning"), "off": 
 MAX_GROUPS = 400
 HISTORY_BYTES = 256 * 1024
 REPEAT_QUIET = 60.0
+SITE_RE = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?")  # a site's domain, e.g. banks.test
 
 
 @dataclass
@@ -134,7 +135,8 @@ class PhpErrorWatcher:
             raw = {}
         notify = raw.get("notify") if raw.get("notify") in NOTIFY_LEVELS else "errors"
         muted = [m for m in raw.get("muted", []) if isinstance(m, str) and re.fullmatch(r"[0-9a-f]{12}", m)]
-        return {"notify": notify, "muted": muted}
+        ignored = sorted({s.lower() for s in raw.get("ignored_sites", []) if isinstance(s, str) and SITE_RE.fullmatch(s.lower())})
+        return {"notify": notify, "muted": muted, "ignored_sites": ignored}
 
     def _save_settings(self) -> None:
         self.settings_file.parent.mkdir(parents=True, exist_ok=True)
@@ -241,10 +243,13 @@ class PhpErrorWatcher:
                 for entry in self._read_new(path, fcgid, history):
                     severity = SEVERITY.get(entry.level.lower(), "warning")
                     message, file, line = locate(entry)
+                    site = self._site_for(file)
+                    if site and site in self.settings["ignored_sites"]:
+                        continue  # the user switched error checking off for this site
                     gid = group_id(severity, message, file, line)
                     group = self._groups.get(gid)
                     if group is None:
-                        group = ErrorGroup(gid, severity, entry.level, message, file, line, self._site_for(file),
+                        group = ErrorGroup(gid, severity, entry.level, message, file, line, site,
                                            path.name, "\n".join(entry.lines), 1, now, now, seen=history)
                         self._groups[gid] = group
                     else:
@@ -278,7 +283,8 @@ class PhpErrorWatcher:
         unseen = [g for g in groups if not g.seen and g.id not in self.settings["muted"]]
         return {"unseen_errors": sum(g.severity == "error" for g in unseen),
                 "unseen_warnings": sum(g.severity == "warning" for g in unseen),
-                "unseen": len(unseen), "groups": len(groups), "notify": self.settings["notify"]}
+                "unseen": len(unseen), "groups": len(groups), "notify": self.settings["notify"],
+                "ignored_sites": list(self.settings["ignored_sites"])}
 
     def groups(self, severity: str = "", site: str = "", query: str = "") -> list[dict[str, Any]]:
         q = query.strip().lower()
@@ -306,6 +312,21 @@ class PhpErrorWatcher:
     def dismiss(self, gid: str) -> None:
         with self._lock:
             self._groups.pop(gid, None)
+
+    def set_site_ignored(self, site: str, ignored: bool) -> str:
+        """Stop (or resume) error checking for one site: its errors are not listed or announced."""
+        site = str(site).strip().lower()
+        if not SITE_RE.fullmatch(site):
+            raise ValueError(f"not a site name: {site!r}")
+        with self._lock:
+            sites = set(self.settings["ignored_sites"])
+            (sites.add if ignored else sites.discard)(site)
+            self.settings["ignored_sites"] = sorted(sites)
+            self._save_settings()
+            if ignored:  # what it already logged goes too
+                for gid in [g.id for g in self._groups.values() if g.site == site]:
+                    del self._groups[gid]
+        return f"PHP errors from {site} are ignored" if ignored else f"PHP errors from {site} are checked again"
 
     def set_muted(self, gid: str, muted: bool) -> None:
         with self._lock:

@@ -1255,8 +1255,18 @@ function errRow(g) {
         ${g.file ? `<button class="btn btn-sm btn-blue" data-act="err-open" data-id="${esc(g.id)}">Open in VS Code</button>` : ""}
         <button class="btn btn-sm" data-act="${g.muted ? "err-unmute" : "err-mute"}" data-id="${esc(g.id)}" title="${g.muted ? "Alert for it again" : "No more alerts for this one"}">${g.muted ? "Unmute" : "Mute alerts"}</button>
         <button class="btn btn-sm btn-ghost" data-act="err-dismiss" data-id="${esc(g.id)}">Dismiss</button>
+        ${g.site ? `<span class="grow"></span><button class="btn btn-sm btn-ghost" data-act="err-ignore-site" data-ref="${esc(g.site)}"
+          title="Stop checking PHP errors for ${esc(g.site)} only">Ignore ${esc(g.site)}</button>` : ""}
       </div>
     </article>`;
+}
+
+function errIgnoredBanner() {
+  const ignored = (S.php_errors || {}).ignored_sites || [];
+  if (!ignored.length) return "";
+  return `<div class="banner banner-blue"><p><b>Not checked:</b> PHP errors from ${ignored.map((s) => `<b>${esc(s)}</b>`).join(", ")}
+      are ignored (not listed, no alerts). Every other site is checked as usual.</p>
+    <div class="row">${ignored.map((s) => `<button class="btn btn-sm" data-act="err-check-site" data-ref="${esc(s)}">Check ${esc(s)} again</button>`).join("")}</div></div>`;
 }
 
 async function loadErrors() {
@@ -1271,10 +1281,10 @@ async function loadErrors() {
     box.innerHTML = `<div class="empty"><h3>Couldn't load the errors</h3><p>${esc(err.message)}</p></div>`;
     return;
   }
-  box.innerHTML = ERR.list.length ? ERR.list.map(errRow).join("")
+  box.innerHTML = errIgnoredBanner() + (ERR.list.length ? ERR.list.map(errRow).join("")
     : `<div class="empty"><h3>${ERR.severity || ERR.site || ERR.q ? "Nothing matches" : "No PHP errors 🎉"}</h3>
         <p>varsha follows every PHP version's <code>logs\\php-*.log</code> live. When a site hits an error it shows up here at once,
-        grouped and with the site, file and line${(S.php_errors || {}).notify === "off" ? "" : ", and you get an alert"}.</p></div>`;
+        grouped and with the site, file and line${(S.php_errors || {}).notify === "off" ? "" : ", and you get an alert"}.</p></div>`);
   if ((S.php_errors || {}).unseen) {
     await api.post("/api/php-errors/seen").catch(() => {});
     S.php_errors = { ...S.php_errors, unseen: 0, unseen_errors: 0, unseen_warnings: 0 };
@@ -1823,6 +1833,19 @@ document.addEventListener("click", async (event) => {
     case "err-open": { const r = await errPost(`/api/php-errors/${id}/open`); if (r) toast({ ok: true, title: "PHP error", message: r.message }); return; }
     case "err-mute": case "err-unmute": if (await errPost(`/api/php-errors/${id}/${action.slice(4)}`)) loadErrors(); return;
     case "err-dismiss": if (await errPost(`/api/php-errors/${id}/dismiss`)) loadErrors(); return;
+    case "err-ignore-site":
+      confirmDialog(`Stop checking ${ref}?`, `PHP errors from ${ref} won't be listed or alerted any more, and its current ones are cleared. Every other site is still checked. You can switch it back on here.`,
+        "Ignore site", async () => {
+          const result = await api.post("/api/php-errors/ignore-site", { site: ref, ignore: true });
+          toast({ ok: true, title: "PHP errors", message: result.message });
+          await refresh(); loadErrors();
+        });
+      return;
+    case "err-check-site": {
+      const result = await errPost("/api/php-errors/ignore-site", { site: ref, ignore: false });
+      if (result) { toast({ ok: true, title: "PHP errors", message: result.message }); await refresh(); loadErrors(); }
+      return;
+    }
     case "err-clear":
       confirmDialog("Clear all PHP errors?", "The list is emptied. The log files themselves are kept in logs\\.", "Clear all",
         async () => { await api.post("/api/php-errors/clear"); loadErrors(); });
