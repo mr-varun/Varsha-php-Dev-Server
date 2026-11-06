@@ -1058,8 +1058,17 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 
 /* ------------------------------------------------------------------ settings */
 
-.settings-page { max-width: 980px; }
-.settings-card { margin-bottom: var(--s4); }
+/* Settings: a two-column grid of cards (the user's choice); one column on narrow windows */
+.settings-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4) var(--s5); align-items: stretch; }
+.settings-card { margin: 0; min-width: 0; }
+.settings-card.settings-wide { grid-column: 1 / -1; }
+@media (max-width: 1180px) { .settings-page { grid-template-columns: 1fr; } }
+@media (min-width: 1800px) { .settings-page { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* in a narrow card the controls move under the text instead of squeezing it */
+.settings-page .settings-row { flex-wrap: wrap; }
+.settings-page .settings-row > .grow { flex: 1 1 300px; min-width: 0; }
+.settings-page .settings-row > :not(.grow) { flex: none; margin-left: auto; }
+.settings-page .settings-row > .settings-backup { flex: 1 1 100%; margin-left: 0; }
 .settings-row { display: flex; align-items: center; gap: var(--s4); padding: var(--s2) 0; }
 .settings-row b { display: block; font-size: 15px; }
 .settings-row small { display: block; margin-top: 2px; }

@@ -11,7 +11,7 @@ const VIEWS = {
   data: { title: "Data Browser", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
   rescue: { title: "MDB Rescue", eyebrow: "recover a damaged access database" },
   mysqlrescue: { title: "MySQL Rescue", eyebrow: "recover a damaged mysql / mariadb data folder" },
-  settings: { title: "Settings", eyebrow: "startup · services · sites · logs · php · backups · tray" },
+  settings: { title: "Settings", eyebrow: "startup · services · sites · logs · php · backups · tray · export" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },

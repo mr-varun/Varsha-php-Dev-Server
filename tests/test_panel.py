@@ -227,3 +227,25 @@ def test_log_size_setting(panel) -> None:  # type: ignore[no-untyped-def]
     assert json.loads(app.paths.settings_file.read_text(encoding="utf-8"))["log_max_mb"] == 5
     assert client.get("/api/settings")[1]["log_max_mb"] == 5
     assert client.post("/api/settings/trim-logs", {})[0] == 200
+
+
+def test_settings_export_and_import_through_the_panel(panel, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import json
+    app, client = panel
+    client.login()
+    app.paths.settings_file.parent.mkdir(parents=True, exist_ok=True)
+    app.paths.settings_file.write_text(json.dumps({"quit_action": "stop"}), encoding="utf-8")
+    status, headers, body = client.request("GET", "/api/settings/export")
+    assert status == 200 and headers["Content-Type"] == "application/zip" and "attachment" in headers["Content-Disposition"]
+    zip_path = tmp_path / "export.zip"
+    zip_path.write_bytes(body)
+    app.paths.settings_file.write_text(json.dumps({"quit_action": "leave"}), encoding="utf-8")
+    app.folder_picker = lambda *a: str(zip_path)
+    status, data = client.post("/api/settings/import-pick", {})
+    staged = data["import"]
+    assert status == 200 and {"name": "settings.json", "status": "changed"} in staged["files"]
+    assert client.post("/api/settings/import", {"token": "nope"})[0] == 400
+    status, data = client.post("/api/settings/import", {"token": staged["token"]})
+    assert status == 200 and "Restart varsha" in data["message"]  # no restart hook in tests
+    assert json.loads(app.paths.settings_file.read_text(encoding="utf-8"))["quit_action"] == "stop"
+    assert list((app.paths.data / "settings-backups").iterdir())

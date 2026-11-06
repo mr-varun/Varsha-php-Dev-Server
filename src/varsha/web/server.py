@@ -189,6 +189,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/settings/export":
+            self._guarded(lambda: self._download(*self._export_settings()))
         elif parts.path == "/api/settings":
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.settings_data()))
         elif m := re.fullmatch(r"/api/(rescue|mysql-rescue)", parts.path):
@@ -245,6 +247,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._download(body, ctype, name)
         else:
             self._error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _export_settings(self) -> tuple[bytes, str, str]:
+        body, name = self.app.export_settings()
+        return body, "application/zip", name
 
     def _download(self, body: bytes, content_type: str, filename: str) -> None:
         """Always a download (attachment), never rendered in the panel's origin."""
@@ -534,6 +540,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.set_backup_dir(body.get("folder"))})
         elif path == "/api/settings/notify":
             self._json(HTTPStatus.OK, {"message": app.set_notify(body.get("kinds"))})
+        elif path == "/api/settings/import-pick":
+            self._json(HTTPStatus.OK, {"import": app.pick_settings_import()})
+        elif path == "/api/settings/import":
+            self._json(HTTPStatus.OK, {"message": app.import_settings(body.get("token"))})
         elif path == "/api/settings/log-size":
             self._json(HTTPStatus.OK, {"message": app.set_log_size(body.get("mb"))})
         elif path == "/api/settings/trim-logs":

@@ -12,6 +12,7 @@ import itertools
 import json
 import logging
 import os
+import secrets
 import subprocess
 import threading
 import time
@@ -23,7 +24,7 @@ from typing import Any
 
 from varsha import __version__
 from varsha.config_engine.engine import ConfigEngine
-from varsha import app_settings
+from varsha import app_settings, settings_transfer
 from varsha.devtools import DevTools, update_settings_file
 from varsha.doctor import Doctor
 from varsha.errors import ConfigError, ServiceError, VarshaError
@@ -667,6 +668,43 @@ class PanelApp:
         chosen = tuple(k for k in NOTIFY_KINDS if k in kinds)
         self._apply_settings({"tray_notifications": {k: k in chosen for k in NOTIFY_KINDS}}, notify=chosen)
         return "Tray notifications: " + (", ".join(NOTIFY_KINDS[k].split(" (")[0].lower() for k in chosen) if chosen else "none")
+
+    def export_settings(self) -> tuple[bytes, str]:
+        return settings_transfer.export_zip(self.paths.config, __version__)
+
+    def pick_settings_import(self) -> dict[str, Any] | None:
+        """A native file dialog for the .zip, then a preview of what it would change (nothing yet)."""
+        if self.folder_picker is None:
+            raise ServiceError("The file dialog isn't available")
+        chosen = self.folder_picker("Choose a varsha settings export", "file", "varsha settings (*.zip);;All files (*)")
+        if not chosen:
+            return None
+        try:
+            content = settings_transfer.read_zip(Path(chosen))
+        except settings_transfer.TransferError as exc:
+            raise ValueError(str(exc)) from None
+        return self._stage_import(Path(chosen).name, content)
+
+    def _stage_import(self, source: str, content: dict[str, Any]) -> dict[str, Any]:
+        token = secrets.token_hex(8)
+        self._pending_import = {"token": token, "files": content["files"], "source": source}
+        manifest = content.get("manifest") or {}
+        return {"token": token, "source": source, "exported": str(manifest.get("exported") or ""),
+                "version": str(manifest.get("varsha") or ""),
+                "files": settings_transfer.preview(self.paths.config, content["files"])}
+
+    def import_settings(self, token: Any) -> str:
+        pending = getattr(self, "_pending_import", None)
+        if not pending or token != pending["token"]:
+            raise ValueError("Choose the settings file again")
+        backup, written = settings_transfer.apply(self.paths.config, self.paths.data / "settings-backups", pending["files"])
+        self._pending_import = None
+        logger.info("Settings imported from %s: %s (previous files in %s)", pending["source"], ", ".join(written), backup)
+        note = f"Imported {', '.join(written)}; the previous files are in data\\{backup.parent.name}\\{backup.name}."
+        if self.restart_hook is None:
+            return note + " Restart varsha to use them."
+        threading.Timer(1.0, self.restart_hook).start()  # the answer reaches the page first
+        return note + " varsha restarts now to use them (services keep running)."
 
     def set_log_size(self, value: Any) -> str:
         try:

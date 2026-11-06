@@ -152,6 +152,18 @@ function drawSettings() {
       <div class="row settings-actions"><button class="btn btn-yellow" data-s="save-notify">Save</button>
         <button class="btn" data-s="notify-test">Send a test</button>
         <span class="muted" id="settings-notify-note">The panel's own messages always show.</span></div>
+    </section>
+
+    <section class="card settings-card settings-wide">
+      <div class="card-head"><h3 class="card-title">Export / import</h3></div>
+      <div class="settings-row">
+        <div class="grow"><b>All of varsha's settings in one .zip</b>
+          <small class="muted">Settings, services, PHP, sites, scheduled jobs, remote databases and the PHP error watcher. Saved passwords are
+            <span class="settings-em">not</span> included (they only work for this Windows account): enter them again after an import.</small></div>
+        <div class="row">
+          <a class="btn btn-yellow" href="/api/settings/export" download>Export .zip</a>
+          <button class="btn" data-s="import">Import…</button></div>
+      </div>
     </section>`;
 }
 
@@ -176,6 +188,23 @@ function timezoneSelect(d) {
       <optgroup label="Common">${top.filter(([z]) => known.has(z)).map(([z, l]) => option(z, l, true)).join("")}</optgroup>
       ${[...groups].map(([region, zones]) => `<optgroup label="${esc(region)}">${zones.map((z) => option(z, "", !inTop)).join("")}</optgroup>`).join("")}
     </select>`;
+}
+
+// What an import changes, before anything is written.
+function importDialog(p) {
+  const label = { changed: "changes", new: "new", same: "same as now", kept: "not in the zip: stays" };
+  const changes = p.files.filter((f) => f.status === "changed" || f.status === "new").length;
+  dialog(`<h2>Import ${esc(p.source)}?</h2>
+    <p class="muted">${p.exported ? `Exported ${esc(p.exported)}` : ""}${p.version ? ` from varsha ${esc(p.version)}` : ""}</p>
+    <ul class="data-list">${p.files.map((f) => `<li><code>${esc(f.name)}</code>: ${f.status === "changed" || f.status === "new" ? `<b>${label[f.status]}</b>` : esc(label[f.status] || f.status)}</li>`).join("")}</ul>
+    <p>The current files are copied to <code>data\\settings-backups</code> first. varsha then restarts to use the new ones
+      (services keep running). Saved passwords aren't part of it.</p>
+    <div class="form-error"></div>
+    <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button>
+      <button class="btn btn-coral" value="ok" ${changes ? "" : "disabled"}>${changes ? "Import and restart" : "Nothing to change"}</button></div>`,
+  async () => {
+    toast({ ok: true, title: "Settings", message: (await api.post("/api/settings/import", { token: p.token })).message });
+  });
 }
 
 // The warning before a TLD change: what moves, what ends, and the admin prompt.
@@ -246,6 +275,9 @@ document.addEventListener("click", async (event) => {
     } else if (s === "save-notify") {
       const kinds = [...$("#settings").querySelectorAll('[data-s="notify"]:checked')].map((x) => x.dataset.id);
       await saveSettingForm("/api/settings/notify", { kinds });
+    } else if (s === "import") {
+      const staged = (await api.post("/api/settings/import-pick", {})).import;
+      if (staged) importDialog(staged);
     } else if (s === "trim-logs") {
       await saveSettingForm("/api/settings/trim-logs", {});
     } else if (s === "notify-test") {
