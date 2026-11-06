@@ -178,3 +178,14 @@ def test_seen_clear_and_dismiss(tmp_path: Path) -> None:
     assert h.watcher.groups(query="NUM_ROWS")[0]["level"] == "Warning"
     h.watcher.clear()
     assert h.watcher.groups() == []
+
+
+def test_ignored_sites_follow_a_tld_change(tmp_path: Path) -> None:
+    from varsha.php.errors import PhpErrorWatcher
+    watcher = PhpErrorWatcher(tmp_path / "logs", tmp_path / "php-errors.json", site_roots=lambda: [], on_event=lambda e: None)
+    watcher.set_site_ignored("banks.test", True)
+    watcher.set_site_ignored("keep.example", True)
+    assert watcher.rename_tld("test", "lan") == 1
+    assert watcher.settings["ignored_sites"] == ["banks.lan", "keep.example"]
+    assert "banks.lan" in (tmp_path / "php-errors.json").read_text(encoding="utf-8")
+    assert watcher.rename_tld("test", "lan") == 0

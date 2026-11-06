@@ -191,3 +191,25 @@ def test_settings_batch_two_apply_at_once(panel, tmp_path) -> None:  # type: ign
     assert app.settings.panel_port == Settings().panel_port  # never touched by these saves
     status, body = client.post("/api/settings/notify-test", {})
     assert status in (400, 500) or "tray" in str(body)  # no tray in tests
+
+
+def test_changing_the_tld_renames_everything_that_names_sites(panel, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import json
+    app, client = panel
+    client.login()
+    queued = []
+    monkeypatch.setattr(app, "run_task", lambda title, fn, *a, **k: queued.append(title) or 1)  # no admin prompt in tests
+    app.php_errors.set_site_ignored("banks.test", True)
+    status, preview = client.post("/api/settings/tld-preview", {"tld": ".Lan"})
+    assert status == 200 and (preview["old"], preview["new"]) == ("test", "lan")
+    assert preview["ignored_sites"] == ["banks.test"]
+    assert client.post("/api/settings/tld", {"tld": "dev"})[0] == 400  # .dev forces HTTPS: refused
+    assert client.post("/api/settings/tld", {"tld": "no spaces"})[0] == 400
+    status, body = client.post("/api/settings/tld", {"tld": "lan"})
+    assert status == 200 and "admin rights" in body["message"]
+    assert queued == ["Move sites to .lan"]  # vhosts, DNS, hosts and the DNS route follow in a task
+    assert app.settings.tld == app.engine.settings.tld == app.manager.settings.tld == app.tunnels.tld == "lan"
+    assert app.php_errors.settings["ignored_sites"] == ["banks.lan"]
+    assert json.loads(app.paths.settings_file.read_text(encoding="utf-8"))["tld"] == "lan"
+    assert client.get("/api/state")[1]["tld"] == "lan"
+    assert "already" in client.post("/api/settings/tld", {"tld": "lan"})[1]["message"]

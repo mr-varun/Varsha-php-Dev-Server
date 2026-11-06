@@ -315,6 +315,18 @@ class Scheduler:
     def _save_state(self) -> None:
         _atomic_write(self.state_file, {key: asdict(value) for key, value in sorted(self._state.items())})
 
+    def rename_tld(self, old: str, new: str) -> int:
+        """The sites' TLD changed (Settings): tasks tied to admin.<old> now run for admin.<new>."""
+        with self._lock:
+            changed = 0
+            for tid, task in list(self._store.tasks.items()):
+                if task.site.endswith("." + old):
+                    self._store.tasks[tid] = replace(task, site=task.site[: -len(old)] + new)
+                    changed += 1
+            if changed:
+                self._save_plans()
+        return changed
+
     # ------------------------------------------------------------------ backup plans
 
     def backup_plan(self, service_id: str) -> BackupPlan:

@@ -95,13 +95,26 @@ def system_dns_servers() -> list[str]:
     return servers
 
 
+def configured_tld() -> str:
+    """The sites' TLD from this varsha's settings.json, so a TLD changed on the Settings page
+    reaches the DNS service without editing services.json (deployed copies keep their own)."""
+    try:
+        from varsha.paths import AppPaths
+        from varsha.settings import load_settings
+        return load_settings(AppPaths.discover().settings_file).tld
+    except Exception:  # noqa: BLE001 - a broken settings.json must not stop DNS
+        return "test"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="varsha-dns")
     parser.add_argument("--port", type=int, default=53)
     parser.add_argument("--address", default="127.0.0.1")
-    parser.add_argument("--tld", default="test")
+    parser.add_argument("--tld", default=None, help="default: settings.json \"tld\" of this varsha (else test)")
     parser.add_argument("--upstream", action="append", default=[])
     args = parser.parse_args(argv)
+    if not args.tld:
+        args.tld = configured_tld()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stdout)
 
     upstreams = args.upstream or system_dns_servers() or ["1.1.1.1", "8.8.8.8"]

@@ -1089,3 +1089,5 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .settings-row-wrap > .grow { flex: 1 1 100%; }
 .settings-backup { flex: 1 1 100%; min-width: 0; }
 .settings-backup .input { min-width: 0; }
+.settings-tld { width: 140px; min-height: 38px; }
+.settings-tld-dot { font: 700 20px var(--mono); }

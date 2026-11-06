@@ -328,6 +328,17 @@ class PhpErrorWatcher:
                     del self._groups[gid]
         return f"PHP errors from {site} are ignored" if ignored else f"PHP errors from {site} are checked again"
 
+    def rename_tld(self, old: str, new: str) -> int:
+        """The sites' TLD changed (Settings): ignored sites follow (banks.test -> banks.<new>)."""
+        with self._lock:
+            before = list(self.settings["ignored_sites"])
+            after = sorted({s[: -len(old)] + new if s.endswith("." + old) else s for s in before})
+            if after == sorted(before):
+                return 0
+            self.settings["ignored_sites"] = after
+            self._save_settings()
+        return sum(1 for s in before if s.endswith("." + old))
+
     def set_muted(self, gid: str, muted: bool) -> None:
         with self._lock:
             muted_ids = [m for m in self.settings["muted"] if m != gid]

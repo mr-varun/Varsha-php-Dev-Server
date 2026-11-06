@@ -149,3 +149,13 @@ def test_the_default_timezone_is_india(tmp_path: Path) -> None:
     assert load_settings(tmp_path / "missing.json").php_timezone == "Asia/Kolkata"
     default = json.loads((Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8"))
     assert default["php_timezone"] == "Asia/Kolkata"  # what a fresh install gets
+
+
+def test_the_dns_service_reads_the_tld_from_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from varsha.dns.server import configured_tld
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "settings.json").write_text(json.dumps({"tld": "lan"}), encoding="utf-8")
+    monkeypatch.setenv("VARSHA_ROOT", str(tmp_path))
+    assert configured_tld() == "lan"
+    (tmp_path / "config" / "settings.json").write_text("{broken", encoding="utf-8")
+    assert configured_tld() == "test"  # a broken file never stops DNS

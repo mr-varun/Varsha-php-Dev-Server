@@ -194,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     manager = ServiceManager(paths, services, settings, prepare=engine.prepare, credentials=credentials)
     sites = SiteManager(engine, manager)
     tunnels = TunnelManager(paths)
+    tunnels.tld = settings.tld
     tunnels.kill_orphans()  # a crashed session must not leave a site public
 
     main_thread = _MainThread()

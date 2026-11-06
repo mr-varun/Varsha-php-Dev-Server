@@ -9,7 +9,11 @@ from urllib.parse import urlsplit
 from varsha.errors import ConfigError
 
 LOCAL_NAMES = frozenset({"localhost"})
-LOCAL_TLDS = (".test", ".localhost")
+LOCAL_TLDS = (".test", ".localhost")  # with the default TLD; local_tlds() follows settings.json "tld"
+
+
+def local_tlds(tld: str = "test") -> tuple[str, ...]:
+    return tuple(dict.fromkeys((f".{tld.strip('.').lower()}", ".localhost")))
 
 
 @dataclass(frozen=True)
@@ -18,6 +22,7 @@ class TunnelTarget:
     host: str  # as typed, e.g. "myapp.test"
     port: int
     path: str  # only used to build the link to open; the whole host is shared
+    tld: str = "test"  # the sites' TLD (settings.json)
 
     @property
     def origin(self) -> str:
@@ -42,7 +47,7 @@ class TunnelTarget:
     @property
     def shares_localhost(self) -> bool:
         """True when the default server is shared, which includes /phpmyadmin from Phase 2 on."""
-        return not self.host.endswith(LOCAL_TLDS)
+        return not self.host.endswith(local_tlds(self.tld))
 
 
 def _is_loopback(host: str) -> bool:
@@ -52,10 +57,10 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
-def parse_target(text: str) -> TunnelTarget:
+def parse_target(text: str, tld: str = "test") -> TunnelTarget:
     raw = text.strip()
     if not raw:
-        raise ConfigError("Type a local address to share, for example http://localhost:8025 or myapp.test")
+        raise ConfigError(f"Type a local address to share, for example http://localhost:8025 or myapp.{tld}")
     if "://" not in raw:
         raw = "http://" + raw
     parts = urlsplit(raw)
@@ -65,10 +70,10 @@ def parse_target(text: str) -> TunnelTarget:
     host = (parts.hostname or "").lower()
     if not host:
         raise ConfigError(f'"{text.strip()}" has no host name')
-    if not (host in LOCAL_NAMES or host.endswith(LOCAL_TLDS) or _is_loopback(host)):
+    if not (host in LOCAL_NAMES or host.endswith(local_tlds(tld)) or _is_loopback(host)):
         raise ConfigError(
             f'"{host}" is not a local address. Only localhost, 127.0.0.1 and local sites '
-            "(*.test) can be shared."
+            f"(*.{tld}) can be shared."
         )
     try:
         port = parts.port or (443 if scheme == "https" else 80)
@@ -76,4 +81,4 @@ def parse_target(text: str) -> TunnelTarget:
         raise ConfigError(f"Invalid port in {text.strip()!r}") from exc
     if _is_loopback(host):
         host = "localhost"  # the vhost name a local server expects for a bare loopback address
-    return TunnelTarget(scheme=scheme, host=host, port=port, path=parts.path or "/")
+    return TunnelTarget(scheme=scheme, host=host, port=port, path=parts.path or "/", tld=tld)

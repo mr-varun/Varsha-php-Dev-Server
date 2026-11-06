@@ -108,6 +108,7 @@ class TunnelManager:
                  start_timeout: float = 45.0, dns_check: Callable[[str], bool] | None = None,
                  dns_timeout: float = 45.0) -> None:
         self.paths = paths
+        self.tld = "test"  # the sites' TLD; the GUI sets it from settings.json (and Settings changes it)
         self._command = list(command) if command else [str(paths.root / CLOUDFLARED)]
         self.start_timeout = start_timeout
         self._dns_check = dns_check or public_dns_resolves
@@ -145,7 +146,7 @@ class TunnelManager:
 
     def start(self, text: str) -> TunnelStatus:
         try:
-            target = parse_target(text)
+            target = parse_target(text, self.tld)
         except ConfigError as exc:
             raise TunnelError(str(exc)) from exc
         if not self.installed:

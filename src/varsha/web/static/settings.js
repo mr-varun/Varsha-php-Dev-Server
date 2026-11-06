@@ -101,6 +101,20 @@ function drawSettings() {
     </section>
 
     <section class="card settings-card">
+      <div class="card-head"><h3 class="card-title">Sites</h3></div>
+      <div class="settings-row">
+        <div class="grow"><b>Address ending (TLD)</b>
+          <small class="muted">Every folder in <code>www\\</code> becomes <code>folder.${esc(d.tld)}</code>. Changing it renames every site,
+            its HTTPS certificate, the hosts entries and the DNS route. Your projects' own settings (APP_URL in .env) don't change.</small></div>
+        <form class="row" data-s="tld-form">
+          <span class="settings-tld-dot">.</span>
+          <input class="input mono settings-tld" name="tld" value="${esc(d.tld)}" spellcheck="false" autocomplete="off"
+            pattern="[A-Za-z][A-Za-z0-9-]{0,62}" aria-label="Site address ending">
+          <button class="btn btn-coral" type="submit">Change…</button></form>
+      </div>
+    </section>
+
+    <section class="card settings-card">
       <div class="card-head"><h3 class="card-title">Backups</h3></div>
       <div class="settings-row settings-row-wrap">
         <div class="grow"><b>Backup folder</b>
@@ -147,6 +161,30 @@ function timezoneSelect(d) {
       <optgroup label="Common">${top.filter(([z]) => known.has(z)).map(([z, l]) => option(z, l, true)).join("")}</optgroup>
       ${[...groups].map(([region, zones]) => `<optgroup label="${esc(region)}">${zones.map((z) => option(z, "", !inTop)).join("")}</optgroup>`).join("")}
     </select>`;
+}
+
+// The warning before a TLD change: what moves, what ends, and the admin prompt.
+async function tldDialog(value) {
+  const p = await api.post("/api/settings/tld-preview", { tld: value.replace(/^\.+/, "") });
+  if (p.old === p.new) { toast({ ok: true, title: "Settings", message: `Sites already end in .${p.new}` }); return; }
+  const more = p.site_count > p.renamed.length ? `<li class="muted">and ${p.site_count - p.renamed.length} more</li>` : "";
+  dialog(`<h2>Change .${esc(p.old)} to .${esc(p.new)}?</h2>
+    <p>Every site gets a new address:</p>
+    <ul class="data-list">${p.renamed.map((r) => `<li><code>${esc(r)}</code></li>`).join("") || "<li class=\"muted\">(no sites in www\\ yet)</li>"}${more}</ul>
+    <ul class="data-list">
+      <li>Windows asks for <b>admin rights</b> to rewrite the hosts file${p.dns_route ? ", and once more to move the DNS route" : ""}.</li>
+      <li>New HTTPS certificates are made; Apache reloads (no downtime).</li>
+      ${p.tunnels ? "<li><b>Shared online links stop</b> (they use the old names).</li>" : ""}
+      ${p.lan_shares ? `<li><b>${p.lan_shares} LAN share${p.lan_shares === 1 ? "" : "s"} stop</b>.</li>` : ""}
+      ${p.ignored_sites.length ? `<li>Error checking stays off for ${esc(p.ignored_sites.map((s) => s.replace(new RegExp(`\\.${p.old}$`), `.${p.new}`)).join(", "))}.</li>` : ""}
+      <li><b>Your projects aren't changed:</b> update their own URLs (APP_URL in .env, WordPress site URL) to <code>.${esc(p.new)}</code>.</li>
+    </ul>
+    <div class="form-error"></div>
+    <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button>
+      <button class="btn btn-coral" value="ok">Change to .${esc(p.new)}</button></div>`, async () => {
+    toast({ ok: true, title: "Settings", message: (await api.post("/api/settings/tld", { tld: p.new })).message });
+    await renderSettings();
+  });
 }
 
 async function saveSettingForm(url, body) {
@@ -224,6 +262,7 @@ document.addEventListener("submit", async (event) => {
     if (form.dataset.s === "port-form") await saveSettingForm("/api/settings/panel-port", { port: data.get("port") });
     else if (form.dataset.s === "tz-form") await saveSettingForm("/api/settings/timezone", { timezone: data.get("timezone") });
     else if (form.dataset.s === "backup-form") await saveSettingForm("/api/settings/backup-dir", { folder: data.get("folder") });
+    else if (form.dataset.s === "tld-form") await tldDialog(String(data.get("tld") || ""));
   } catch (err) {
     toast({ ok: false, title: "Settings", message: err.message });
   }

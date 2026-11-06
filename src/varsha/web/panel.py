@@ -609,7 +609,7 @@ class PanelApp:
             overridden = []
         default_php = self.engine.default_php()
         return {**snapshot,
-                "open_panel_on_start": s.open_panel_on_start, "quit_action": s.quit_action,
+                "open_panel_on_start": s.open_panel_on_start, "quit_action": s.quit_action, "tld": s.tld,
                 "php_timezone": s.php_timezone, "timezone_overridden": overridden,
                 "timezones": app_settings.php_timezones(default_php.php_exe if default_php else None),
                 "backup_dir": s.backup_dir, "backup_path": str(self.databases.backup_root),
@@ -665,6 +665,63 @@ class PanelApp:
         chosen = tuple(k for k in NOTIFY_KINDS if k in kinds)
         self._apply_settings({"tray_notifications": {k: k in chosen for k in NOTIFY_KINDS}}, notify=chosen)
         return "Tray notifications: " + (", ".join(NOTIFY_KINDS[k].split(" (")[0].lower() for k in chosen) if chosen else "none")
+
+    def tld_preview(self, value: Any) -> dict[str, Any]:
+        """What a TLD change would do, for the warning dialog (nothing is changed)."""
+        new = self._check_tld(value)
+        old = self.settings.tld
+        sites = self.engine.sites()
+        return {"old": old, "new": new, "sites": [s.domain for s in sites][:12], "site_count": len(sites),
+                "renamed": [f"{s.domain} → {s.domain[: -len(old)]}{new}" for s in sites][:6],
+                "dns_route": self.dns_route_active(), "tunnels": self.tunnels.any_running(),
+                "ignored_sites": [s for s in self.php_errors.settings["ignored_sites"] if s.endswith("." + old)],
+                "lan_shares": len(self.sites.lan.shares)}
+
+    def _check_tld(self, value: Any) -> str:
+        from varsha.sites.discovery import validate_tld
+        try:
+            return validate_tld(str(value or ""))
+        except ConfigError as exc:
+            raise ValueError(str(exc)) from None
+
+    def set_tld(self, value: Any) -> str:
+        """Change the sites' TLD: every site, hosts entry, certificate and the DNS route follow.
+        Shared links and LAN shares use the old names, so they end. Windows asks for admin rights
+        for the hosts file (and once more for the DNS route, if it was on)."""
+        new = self._check_tld(value)
+        old = self.settings.tld
+        if new == old:
+            return f"Sites already end in .{new}"
+        route_was_on = self.dns_route_active()
+        self.tunnels.stop_all()
+        self.sites.lan_stop_all()
+        self._apply_settings({"tld": new}, tld=new)
+        self.tunnels.tld = new
+        self._dns_route_cache = (0.0, False)
+        renamed = self.php_errors.rename_tld(old, new) + self.scheduler.rename_tld(old, new)
+        logger.info("Sites TLD changed: .%s -> .%s (%d saved site names renamed)", old, new, renamed)
+
+        def follow() -> str:
+            steps = []
+            self.sites.sync()  # vhosts + HTTPS certificates for the new names; Apache reloads
+            steps.append("sites renamed")
+            dns = next((s for s in self.manager.statuses() if s.id == "dns"), None)
+            if dns is not None and dns.state.value == "running":
+                self.manager.restart("dns")  # it reads the TLD from settings.json
+                steps.append("DNS restarted")
+            try:
+                steps.append(self.sites.update_hosts())
+            except Exception as exc:  # noqa: BLE001 - e.g. the admin prompt was declined
+                steps.append(f"hosts file not updated ({exc}); use Update hosts on the Sites page")
+            if route_was_on:
+                try:
+                    steps.append(self.sites.dns_route(True))
+                except Exception as exc:  # noqa: BLE001
+                    steps.append(f"DNS route not moved ({exc}); switch it on again on the System page")
+            return f"Sites now end in .{new}: " + "; ".join(steps)
+
+        self.run_task(f"Move sites to .{new}", follow, success=lambda msg: msg)
+        return f"Moving every site from .{old} to .{new} (Windows asks for admin rights for the hosts file)"
 
     def notify_test(self) -> str:
         if self.notify_hook is None:

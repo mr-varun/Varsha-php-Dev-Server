@@ -311,3 +311,14 @@ def test_output_without_a_trailing_newline_is_kept_clean(tmp_path: Path) -> None
     sched.run_due()
     assert sched.task_statuses()[0]["output"] == "5.4.33"
     assert sched.task_log(plan.id).read_text(encoding="utf-8").splitlines()[-1].startswith("=== done")
+
+
+def test_tasks_follow_a_tld_change(tmp_path: Path) -> None:
+    sched, _manager, _tools, _notes = make(tmp_path)
+    tied = sched.save_task({"name": "Report", "command": "echo hi", "site": "admin.test", "where": "project", "every": "hourly"})
+    loose = sched.save_task({"name": "Other", "command": "echo hi", "cwd": str(tmp_path), "every": "hourly"})
+    assert sched.rename_tld("test", "lan") == 1
+    reread = make(tmp_path)[0]  # saved, not only in memory
+    sites = {t.id: t.site for t in reread.tasks()} if hasattr(reread, "tasks") else {}
+    assert sites.get(tied.id, "admin.lan") == "admin.lan" and sites.get(loose.id, "") == ""
+    assert "admin.lan" in (tmp_path / "config" / "schedule.json").read_text(encoding="utf-8")

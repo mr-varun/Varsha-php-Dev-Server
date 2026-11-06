@@ -156,3 +156,13 @@ def test_not_installed(app_paths: AppPaths) -> None:
     assert not tunnels.installed
     with pytest.raises(TunnelError, match="not installed"):
         tunnels.start("localhost:8025")
+
+
+def test_targets_follow_the_sites_tld() -> None:
+    from varsha.errors import ConfigError
+    from varsha.tunnel.target import parse_target
+    target = parse_target("shop.lan", tld="lan")
+    assert target.host == "shop.lan" and not target.shares_localhost
+    with pytest.raises(ConfigError, match=r"\*\.test"):
+        parse_target("shop.lan")  # the default TLD is still test
+    assert parse_target("myapp.localhost", tld="lan").host == "myapp.localhost"
