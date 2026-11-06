@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -128,10 +129,33 @@ def make_folder_picker(main_thread: _MainThread) -> Any:
     return pick
 
 
+def wait_for_exit(pid: int, timeout: float = 120.0) -> None:
+    """A restart: the old varsha is still quitting (and holds the lock and the panel port)."""
+    import psutil
+    try:
+        psutil.Process(pid).wait(timeout)
+    except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+        pass
+
+
+def restart_command(after_pid: int) -> list[str]:
+    """How to start this copy of varsha again, waiting for `after_pid` to end first."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--after", str(after_pid)]
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    return [str(pythonw if pythonw.is_file() else Path(sys.executable)), "-m", "varsha", "--after", str(after_pid)]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="varsha")
     parser.add_argument("--no-browser", action="store_true", help="don't open the control panel on start")
+    parser.add_argument("--startup", action="store_true", help="started by Windows at login: quietly, in the tray")
+    parser.add_argument("--after", type=int, default=0, help="wait for this varsha process to end first (restart)")
     args, qt_args = parser.parse_known_args(argv if argv is not None else sys.argv[1:])
+    if args.startup:
+        args.no_browser = True
+    if args.after:
+        wait_for_exit(args.after)
 
     paths = AppPaths.discover()
     paths.ensure_dirs()
@@ -181,6 +205,15 @@ def main(argv: list[str] | None = None) -> int:
         QMessageBox.critical(None, "varsha", f"The control panel could not start: {exc}")
         return 1
     tunnels.blocked_ports = {server.port}
+    panel.running_port = server.port
+
+    def restart() -> None:
+        """Settings > panel port: start a new varsha that waits for this one, then quit (services keep running)."""
+        subprocess.Popen(restart_command(os.getpid()), cwd=str(paths.root), close_fds=True,
+                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        main_thread.quit_requested.emit(False)
+
+    panel.restart_hook = restart
     server.start()
     logger.info("Control panel on %s", server.url)
 

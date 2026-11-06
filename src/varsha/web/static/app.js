@@ -10,6 +10,7 @@ const VIEWS = {
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
   data: { title: "Data", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
   rescue: { title: "MDB Rescue", eyebrow: "recover a damaged access database" },
+  settings: { title: "Settings", eyebrow: "startup · services · control panel" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
@@ -1473,6 +1474,10 @@ function render() {
   }
   if (view === "rescue") {
     if (!$("#rescue")) { host.innerHTML = viewRescueSkeleton(); renderRescue(); }  // rescue.js manages the page
+    return;
+  }
+  if (view === "settings") {
+    if (!$("#settings")) { host.innerHTML = viewSettingsSkeleton(); renderSettings(); }  // settings.js manages the page
     return;
   }
   if (view === "doctor") {

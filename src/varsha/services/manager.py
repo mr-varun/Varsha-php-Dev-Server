@@ -10,6 +10,7 @@ the service id; the GUI turns that into a Qt signal.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import logging
 import os
 import sys
@@ -267,6 +268,12 @@ class ServiceManager:
         ids = [rt.defn.id for rt in self._runtimes.values()
                if rt.state in (ServiceState.STOPPED, ServiceState.ERROR)]
         self._run_parallel(ids, self.start, "start")
+
+    def set_autostart(self, service_id: str, enabled: bool) -> None:
+        """Change a service's autostart flag for this session too (the Settings page also writes it
+        into services.json)."""
+        rt = self._get(service_id)
+        rt.defn = dataclasses.replace(rt.defn, autostart=enabled)
 
     def start_autostart(self) -> None:
         ids = [rt.defn.id for rt in self._runtimes.values()

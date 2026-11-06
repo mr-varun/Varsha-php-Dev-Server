@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import collections
 import itertools
+import json
 import logging
 import os
 import subprocess
@@ -22,7 +23,8 @@ from typing import Any
 
 from varsha import __version__
 from varsha.config_engine.engine import ConfigEngine
-from varsha.devtools import DevTools
+from varsha import app_settings
+from varsha.devtools import DevTools, update_settings_file
 from varsha.doctor import Doctor
 from varsha.errors import ConfigError, ServiceError, VarshaError
 from varsha.mail.mailpit import MailpitClient, MailWatcher
@@ -551,3 +553,48 @@ class PanelApp:
     def quit(self, stop_services: bool) -> None:
         if self.on_quit:
             self.on_quit(stop_services)
+
+    # ------------------------------------------------------------------ Settings page
+
+    running_port: int = 0      # set by the GUI once the panel is listening
+    restart_hook: Any = None   # set by the GUI: restart varsha (services keep running)
+
+    def _saved_panel_port(self) -> int:
+        try:
+            raw = json.loads(self.paths.settings_file.read_text(encoding="utf-8"))
+            return int(raw.get("panel_port", self.settings.panel_port))
+        except (OSError, ValueError, TypeError):
+            return self.settings.panel_port
+
+    def settings_data(self) -> dict[str, Any]:
+        return app_settings.settings_snapshot(self.paths, self._saved_panel_port(), self.running_port or self.settings.panel_port,
+                                              self.manager, started_with=self.settings.panel_port)
+
+    def set_startup(self, enabled: bool) -> str:
+        return app_settings.StartupEntry().set(enabled)
+
+    def set_autostart(self, ids: Any) -> str:
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise ValueError("services must be a list of service ids")
+        wanted = set(ids)
+        changed = app_settings.set_autostart_flags(self.paths.services_file, wanted)
+        for status in self.manager.statuses():
+            self.manager.set_autostart(status.id, status.id in wanted)
+        if not wanted:
+            return "No service starts with varsha"
+        names = [self.manager.definition(i).name for i in ids]
+        return ("These start with varsha: " + ", ".join(names)) if changed else "Nothing changed"
+
+    def set_panel_port(self, port: Any) -> dict[str, Any]:
+        ports = {p for s in self.manager.statuses() for p in self.manager.definition(s.id).ports}
+        current = self.running_port or self.settings.panel_port
+        new = app_settings.check_panel_port(port, current, ports)
+        update_settings_file(self.paths.settings_file, panel_port=new)
+        if new == self.settings.panel_port:
+            return {"message": f"The control panel stays on port {new}", "restart_needed": False}
+        return {"message": f"Saved: the control panel moves to port {new} when varsha restarts", "restart_needed": True}
+
+    def restart(self) -> None:
+        if self.restart_hook is None:
+            raise ServiceError("Restart isn't available here; quit and start varsha again")
+        self.restart_hook()

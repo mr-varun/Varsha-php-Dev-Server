@@ -39,6 +39,7 @@ STATIC_FILES = {
     "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/static/data.js": ("data.js", "text/javascript; charset=utf-8"),
     "/static/rescue.js": ("rescue.js", "text/javascript; charset=utf-8"),
+    "/static/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
     "/static/logo.png": ("logo.png", "image/png"),
     "/favicon.ico": ("varsha.ico", "image/x-icon"),
 }
@@ -187,6 +188,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/settings":
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.settings_data()))
         elif parts.path == "/api/rescue":
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescue_listing()))
         elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})", parts.path):
@@ -516,6 +519,15 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(m.group(1))})
         elif path == "/api/terminal":
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(None)})
+        elif path == "/api/settings/startup":
+            self._json(HTTPStatus.OK, {"message": app.set_startup(body.get("enable") is True)})
+        elif path == "/api/settings/autostart":
+            self._json(HTTPStatus.OK, {"message": app.set_autostart(body.get("services"))})
+        elif path == "/api/settings/panel-port":
+            self._json(HTTPStatus.OK, app.set_panel_port(body.get("port")))
+        elif path == "/api/settings/restart":
+            self._json(HTTPStatus.OK, {"message": "Restarting: this page reconnects on the new address"})
+            threading.Thread(target=app.restart, daemon=True).start()
         elif path == "/api/rescue/pick":
             self._json(HTTPStatus.OK, {"file": app.pick_rescue_file()})
         elif path == "/api/rescue/start":

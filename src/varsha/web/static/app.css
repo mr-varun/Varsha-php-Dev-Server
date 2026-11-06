@@ -1048,3 +1048,24 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
   .rescue-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rescue-password { margin-left: 0; }
 }
+
+/* ------------------------------------------------------------------ settings */
+
+.settings-page { max-width: 980px; }
+.settings-card { margin-bottom: var(--s4); }
+.settings-row { display: flex; align-items: center; gap: var(--s4); padding: var(--s2) 0; }
+.settings-row b { display: block; font-size: 15px; }
+.settings-row small { display: block; margin-top: 2px; }
+.settings-warn { color: var(--coral); font-weight: 700; }
+.settings-services { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--s2); margin-top: var(--s3); }
+.settings-services.is-muted { opacity: .55; }
+.settings-service {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--paper);
+  border: var(--line-thin); border-radius: var(--radius-sm); cursor: pointer;
+}
+.settings-service:has(input:checked) { background: var(--mint); }
+.settings-service input { width: 16px; height: 16px; accent-color: var(--ink, #111); }
+.settings-service small { margin-left: auto; }
+.settings-actions { margin-top: var(--s3); gap: var(--s3); }
+.settings-port { width: 120px; min-height: 38px; }
+@media (max-width: 760px) { .settings-row { flex-direction: column; align-items: stretch; } }
