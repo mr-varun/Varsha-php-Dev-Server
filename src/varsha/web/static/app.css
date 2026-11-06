@@ -73,13 +73,19 @@ code, .mono { font-family: var(--mono); font-size: .86em; }
 /* ------------------------------------------------------------------ layout: sticky top bar + page */
 
 .app { min-height: 100vh; }
+/* The sticky band around the bar: a plain background above and below it, so the page never shows
+   through the gaps while it scrolls (the user's choice: clean, no dots). */
+.topbar-band {
+  position: sticky; top: 0; z-index: 30;
+  padding: var(--s3) var(--s5); background: var(--paper);
+}
 .topbar {
-  position: sticky; top: var(--s3); z-index: 30;
+  position: relative;
   display: flex; align-items: center; gap: var(--s3) var(--s4); flex-wrap: wrap;
-  margin: var(--s3) var(--s5) 0; padding: 10px 12px;
+  margin: 0; padding: 10px 12px;
   background: var(--card); border: var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm);
 }
-.main { max-width: 1480px; margin: 0 auto; padding: var(--s5) var(--s5) var(--s7); min-width: 0; }
+.main { max-width: 1480px; margin: 0 auto; padding: calc(var(--s5) - var(--s3)) var(--s5) var(--s7); min-width: 0; }
 
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); margin-right: var(--s2); }
 .brand-mark {
@@ -571,7 +577,7 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 860px) {
-  .topbar { position: static; margin: var(--s3); }
+  .topbar-band { position: static; padding: var(--s3); }
   .topbar-spacer { display: none; }
   .meter { order: 5; flex: 1 1 100%; }
   .main { padding: var(--s4); }
@@ -946,7 +952,7 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .data-name { margin: 0; font-size: 24px; overflow-wrap: anywhere; }
 .data-path { margin: 2px 0 var(--s3); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .data-body { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: var(--s4); align-items: start; }
-.data-tables { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 96px; max-height: calc(100vh - 120px); overflow: auto; padding-bottom: 6px; }
+.data-tables { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 108px; max-height: calc(100vh - 132px); overflow: auto; padding-bottom: 6px; }
 .data-table { display: flex; align-items: center; gap: var(--s2); padding: 7px 10px; background: var(--card); color: var(--text); border: var(--line-thin); border-radius: var(--radius-sm); font-weight: 700; cursor: pointer; text-align: left; }
 .data-table small { color: var(--muted); font-weight: 600; }
 .data-table span.grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
