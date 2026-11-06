@@ -77,3 +77,30 @@ def test_the_work_folder_is_always_removed(tmp_path: Path, monkeypatch: pytest.M
     elevate.run_elevated(AppPaths(tmp_path), ["dns-route-remove"])
     result = Path(calls[0][calls[0].index("--result") + 1])
     assert not result.parent.exists()
+
+
+def test_a_result_file_that_is_still_empty_is_waited_for(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # megha's process ended, the file exists but is empty for longer than the grace period
+    def runas(exe: str, args: list[str], cwd: Path) -> tuple[int | None, bool]:
+        result = Path(args[args.index("--result") + 1])
+        result.write_text("", encoding="utf-8")
+
+        def fill() -> None:
+            time.sleep(1.2)
+            result.write_text(json.dumps({"ok": True, "message": "firewall rule added"}), encoding="utf-8")
+
+        threading.Thread(target=fill, daemon=True).start()
+        return 0, True
+
+    monkeypatch.setattr(elevate, "_shell_execute_runas", runas)
+    monkeypatch.setattr(elevate, "RESULT_WAIT", 3.0)
+    monkeypatch.setattr(elevate, "RESULT_GRACE", 0.5)  # shorter than the 1.2 s the file stays empty
+    assert elevate.run_elevated(AppPaths(tmp_path), ["firewall-lan-add"]) == "firewall rule added"
+
+
+def test_megha_writes_its_result_atomically(tmp_path: Path) -> None:
+    from varsha.helper import megha
+    result = tmp_path / "result.json"
+    megha.main(["dns-route-remove", "--result", str(result), "--tld", "no spaces allowed"])  # refused: no admin action runs
+    assert json.loads(result.read_text(encoding="utf-8"))["ok"] is False
+    assert not (tmp_path / "result.json.tmp").exists()

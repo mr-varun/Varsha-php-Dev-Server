@@ -62,10 +62,18 @@ def _read_result(result_file: Path) -> dict[str, object] | None:
 
 
 def _wait_for_result(result_file: Path, timeout: float) -> dict[str, object] | None:
+    """Poll for megha's result. Once the file exists, wait up to RESULT_WAIT for it to be readable
+    (a virus scanner can hold it for a moment, and older megha builds wrote it in two steps)."""
     deadline = time.monotonic() + timeout
+    extended = False
     while True:
         outcome = _read_result(result_file)
-        if outcome is not None or time.monotonic() >= deadline:
+        if outcome is not None:
+            return outcome
+        if result_file.exists() and not extended:
+            deadline = max(deadline, time.monotonic() + RESULT_WAIT)
+            extended = True
+        if time.monotonic() >= deadline:
             return outcome
         time.sleep(0.2)
 

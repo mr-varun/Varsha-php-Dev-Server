@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 DATABASES = ("bankdb", "inventory1")
 SERVICE = "mysql-5.6"
 MAX_UPLOAD = 4 * 1024 ** 3
+BACKUPS_KEPT = 10  # per database: older Import Banks Data backups go after a successful import
 LOG_LINES = 500
 RUN_RE = re.compile(r"run-\d{8}-\d{6}(?:-\d+)?")
 
@@ -350,6 +351,27 @@ class BankImport:
 
         self._log(f"[5/5] DONE in {time.time() - began:.0f} s: "
                   + ", ".join(f"{db} {n} tables" for db, n in counts.items()))
+        self._tidy(files)
+
+    def _tidy(self, files: dict[str, Path]) -> None:
+        """After a successful import: drop the uploaded copies and keep the newest BACKUPS_KEPT
+        backups of each database (a failed import never gets here, so its backup always stays)."""
+        for path in files.values():
+            path.unlink(missing_ok=True)
+        try:
+            folder = self.databases.backup_dir(SERVICE)
+        except Exception:  # noqa: BLE001
+            return
+        with self._lock:
+            just_made = set(self._state["backups"].values())
+        for database in files:
+            pattern = re.compile(rf".+_{re.escape(database)}_\d{{8}}-\d{{6}}(?:-\d+)?\.sql$")
+            ours = sorted((p for p in folder.glob(f"*_{database}_*.sql") if pattern.fullmatch(p.name)),
+                          key=lambda p: p.stat().st_mtime, reverse=True)
+            for old in ours[BACKUPS_KEPT:]:
+                if old.name not in just_made:
+                    old.unlink(missing_ok=True)
+                    self._log(f"      removed an old backup: {old.name}")
 
     # ------------------------------------------------------------------ MySQL
 

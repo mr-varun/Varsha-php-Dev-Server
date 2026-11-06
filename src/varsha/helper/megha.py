@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -160,7 +161,11 @@ def main(argv: list[str] | None = None) -> int:
         outcome = {"ok": True, "message": message}
     except (HelperError, ConfigError, OSError, ValueError, subprocess.SubprocessError) as exc:
         outcome = {"ok": False, "message": str(exc)}
-    Path(args.result).write_text(json.dumps(outcome), encoding="utf-8")
+    # atomically: varsha polls this file, and a half-written one would read as "no result"
+    result = Path(args.result)
+    tmp = result.with_name(result.name + ".tmp")
+    tmp.write_text(json.dumps(outcome), encoding="utf-8")
+    os.replace(tmp, result)
     return 0 if outcome["ok"] else 1
 
 

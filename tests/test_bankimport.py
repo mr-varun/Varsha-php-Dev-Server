@@ -195,3 +195,26 @@ def test_drop_import_backup_and_restore_on_a_real_server(server, tmp_path: Path)
     tables = subprocess.run([*client, "-N", "-e", "SHOW TABLES FROM bankdb"], capture_output=True,
                             creationflags=FLAGS).stdout.decode().split()
     assert tables == ["branchmaster", "old_only"]  # the data from before the import is back
+
+
+def test_old_backups_are_pruned_after_a_successful_import(tmp_path: Path) -> None:
+    import os
+    paths = AppPaths(tmp_path / "varsha")
+    paths.ensure_dirs()
+    folder = tmp_path / "backups"
+    folder.mkdir()
+    bank = BankImport(paths, SimpleNamespace(), SimpleNamespace(backup_dir=lambda _sid: folder))
+    for day in range(1, 13):  # 12 older backups of bankdb, oldest first
+        f = folder / f"PACS_SAVALAGI_bankdb_202611{day:02d}-120000.sql"
+        f.write_text("x", encoding="utf-8")
+        os.utime(f, (day * 1000, day * 1000))
+    other = folder / "mysql-5.6_20261101-120000.sql"  # a normal varsha backup: never touched
+    other.write_text("x", encoding="utf-8")
+    keep_inventory = folder / "PKPS_TAKKOD_inventory1_20261101-120000.sql"  # inventory1 wasn't imported
+    keep_inventory.write_text("x", encoding="utf-8")
+    upload = tmp_path / "bankdb.sql"
+    upload.write_text("uploaded", encoding="utf-8")
+    bank._tidy({"bankdb": upload})  # noqa: SLF001
+    left = sorted(p.name for p in folder.glob("*_bankdb_*.sql"))
+    assert len(left) == 10 and left[0].endswith("20261103-120000.sql")  # the two oldest went
+    assert other.exists() and keep_inventory.exists() and not upload.exists()
