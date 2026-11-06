@@ -269,6 +269,13 @@ class ServiceManager:
                if rt.state in (ServiceState.STOPPED, ServiceState.ERROR)]
         self._run_parallel(ids, self.start, "start")
 
+    def restart_running(self) -> list[str]:
+        """Restart every service that is running now (stopped ones stay stopped). Returns their names."""
+        ids = [rt.defn.id for rt in self._runtimes.values()
+               if rt.state is ServiceState.RUNNING and proc_utils.is_alive(rt.proc)]
+        self._run_parallel(ids, self.restart, "restart")
+        return [self._runtimes[sid].defn.name for sid in ids]
+
     def set_autostart(self, service_id: str, enabled: bool) -> None:
         """Change a service's autostart flag for this session too (the Settings page also writes it
         into services.json)."""

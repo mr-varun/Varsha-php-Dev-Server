@@ -62,6 +62,7 @@ class Tray:
         self._add(menu, "Open control panel", self.open_panel, bold=True)
         menu.addSeparator()
         self._add(menu, "Start all", lambda: self.run("Start all", self.manager.start_all))
+        self._add(menu, "Restart running services", lambda: self.run("Restart running services", self.manager.restart_running))
         self._add(menu, "Stop all", lambda: self.run("Stop all", self.manager.stop_all))
         menu.addSeparator()
 

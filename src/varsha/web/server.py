@@ -448,6 +448,9 @@ class PanelHandler(BaseHTTPRequestHandler):
             elif action == "autobackup-run":
                 app.run_backup_now(sid)
                 self._json(HTTPStatus.ACCEPTED, {"ok": True})
+        elif path == "/api/all/restart":
+            task("Restart running services", mgr.restart_running,
+                 success=lambda names: ("Restarted " + ", ".join(names)) if names else "Nothing is running")
         elif path in ("/api/all/start", "/api/all/stop"):
             verb = path.rsplit("/", 1)[1]
             task(f"{verb.capitalize()} all", mgr.start_all if verb == "start" else mgr.stop_all)

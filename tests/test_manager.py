@@ -186,3 +186,15 @@ def test_logs_roll_over_even_while_a_process_holds_them(tmp_path: Path) -> None:
     assert small.read_bytes() == b"y" * 10 and own.stat().st_size == 3000
     usage = proc_utils.logs_usage(logs)
     assert usage["count"] == 4 and usage["biggest"][0]["size"] == 3000
+
+
+def test_restart_running_restarts_only_what_runs(make_manager) -> None:  # type: ignore[no-untyped-def]
+    from conftest import free_port
+    manager = make_manager([fake_def("one", free_port()), fake_def("two", free_port())])
+    manager.start("one")
+    first = manager.status("one").pid
+    assert manager.restart_running() == [manager.definition("one").name]
+    assert manager.status("one").state.value == "running" and manager.status("one").pid != first
+    assert manager.status("two").state.value == "stopped"  # stopped services stay stopped
+    manager.stop_all()
+    assert manager.restart_running() == []

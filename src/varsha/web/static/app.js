@@ -1816,6 +1816,7 @@ document.addEventListener("click", async (event) => {
     case "start": case "stop": case "restart": await act(`/api/services/${id}/${action}`); break;
     case "start-all": await act("/api/all/start"); break;
     case "stop-all": await act("/api/all/stop"); break;
+    case "restart-all": await act("/api/all/restart"); break;
     case "menu": openMenu = openMenu === id ? null : id; break;
     case "view-log": logsTail.source = id; el.closest(".toast")?.remove(); go("logs"); return;
     case "log-source": logsTail.start(id); $("#log-sources").innerHTML = logSourceButtons(); return;
