@@ -78,6 +78,7 @@ code, .mono { font-family: var(--mono); font-size: .86em; }
 .topbar-band {
   position: sticky; top: 0; z-index: 30;
   padding: var(--s3) var(--s5); background: var(--paper);
+  border-bottom: var(--line-thin);  /* one separation line below the bar */
 }
 .topbar {
   position: relative;
