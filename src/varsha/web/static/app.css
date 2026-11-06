@@ -1069,3 +1069,11 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .settings-actions { margin-top: var(--s3); gap: var(--s3); }
 .settings-port { width: 120px; min-height: 38px; }
 @media (max-width: 760px) { .settings-row { flex-direction: column; align-items: stretch; } }
+
+/* MySQL Rescue (mysqlrescue.js): the rescue page's cards, plus one block per database */
+.myr-db { margin-top: var(--s4); }
+.myr-db-head { gap: var(--s3); align-items: center; flex-wrap: wrap; margin-bottom: var(--s2); }
+.myr-db-head h4 { margin: 0; font-size: 1.05rem; }
+.myr-note { max-width: 520px; font-size: .85rem; color: var(--muted); white-space: normal; }
+.myr-attempts { margin-top: var(--s4); }
+.myr-attempts summary { cursor: pointer; font-weight: 700; }

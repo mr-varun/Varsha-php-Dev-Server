@@ -10,6 +10,7 @@ const VIEWS = {
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
   data: { title: "Data", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
   rescue: { title: "MDB Rescue", eyebrow: "recover a damaged access database" },
+  mysqlrescue: { title: "MySQL Rescue", eyebrow: "recover a damaged mysql / mariadb data folder" },
   settings: { title: "Settings", eyebrow: "startup · services · control panel" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
@@ -1476,6 +1477,10 @@ function render() {
     if (!$("#rescue")) { host.innerHTML = viewRescueSkeleton(); renderRescue(); }  // rescue.js manages the page
     return;
   }
+  if (view === "mysqlrescue") {
+    if (!$("#mysqlrescue")) { host.innerHTML = viewMysqlRescueSkeleton(); renderMysqlRescue(); }  // mysqlrescue.js manages the page
+    return;
+  }
   if (view === "settings") {
     if (!$("#settings")) { host.innerHTML = viewSettingsSkeleton(); renderSettings(); }  // settings.js manages the page
     return;
@@ -1993,6 +1998,7 @@ function connect() {
   source.addEventListener("mail", (event) => onMailEvent(JSON.parse(event.data)));
   source.addEventListener("php_error", (event) => onPhpErrorEvent(JSON.parse(event.data)));
   source.addEventListener("rescue", (event) => onRescueEvent(JSON.parse(event.data)));
+  source.addEventListener("mysql_rescue", (event) => onMysqlRescueEvent(JSON.parse(event.data)));
   source.onerror = () => { clearTimeout(offlineTimer); offlineTimer = setTimeout(() => { $("#offline").hidden = false; }, 2500); };
 }
 

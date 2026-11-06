@@ -39,6 +39,7 @@ STATIC_FILES = {
     "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/static/data.js": ("data.js", "text/javascript; charset=utf-8"),
     "/static/rescue.js": ("rescue.js", "text/javascript; charset=utf-8"),
+    "/static/mysqlrescue.js": ("mysqlrescue.js", "text/javascript; charset=utf-8"),
     "/static/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
     "/static/logo.png": ("logo.png", "image/png"),
     "/favicon.ico": ("varsha.ico", "image/x-icon"),
@@ -190,10 +191,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
         elif parts.path == "/api/settings":
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.settings_data()))
-        elif parts.path == "/api/rescue":
-            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescue_listing()))
-        elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})", parts.path):
-            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescue.job(m.group(1))))
+        elif m := re.fullmatch(r"/api/(rescue|mysql-rescue)", parts.path):
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescue_listing(m.group(1))))
+        elif m := re.fullmatch(r"/api/(rescue|mysql-rescue)/job/(job-[\w.-]{1,120})", parts.path):
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.rescuer(m.group(1)).job(m.group(2))))
         elif parts.path == "/api/data":
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.data.listing()))
         elif m := re.fullmatch(r"/api/data/([0-9a-f]{16})(?:/(rows|structure|cell|export\.sql|export\.csv))?", parts.path):
@@ -528,29 +529,34 @@ class PanelHandler(BaseHTTPRequestHandler):
         elif path == "/api/settings/restart":
             self._json(HTTPStatus.OK, {"message": "Restarting: this page reconnects on the new address"})
             threading.Thread(target=app.restart, daemon=True).start()
-        elif path == "/api/rescue/pick":
-            self._json(HTTPStatus.OK, {"file": app.pick_rescue_file()})
-        elif path == "/api/rescue/start":
-            options = body.get("options") if isinstance(body.get("options"), dict) else {}
-            self._json(HTTPStatus.OK, {"message": app.rescue.start(str(body.get("file") or ""), str(body.get("preset") or ""), options)})
-        elif path == "/api/rescue/stop":
-            self._json(HTTPStatus.OK, {"message": app.rescue.stop()})
-        elif path == "/api/rescue/forget":
-            app.rescue.forget(str(body.get("file") or ""))
-            self._json(HTTPStatus.OK, {"ok": True})
-        elif m := re.fullmatch(r"/api/rescue/job/(job-[\w.-]{1,120})/(open|data|import|clean|delete)", path):
-            job, action = m.group(1), m.group(2)
+        elif m := re.fullmatch(r"/api/(rescue|mysql-rescue)/(pick|start|stop|forget)", path):
+            kind, action = m.group(1), m.group(2)
+            rescuer = app.rescuer(kind)
+            if action == "pick":
+                self._json(HTTPStatus.OK, {"file": app.pick_rescue_file(kind)})
+            elif action == "start":
+                options = body.get("options") if isinstance(body.get("options"), dict) else {}
+                self._json(HTTPStatus.OK, {"message": rescuer.start(str(body.get("file") or ""), str(body.get("preset") or ""), options)})
+            elif action == "stop":
+                self._json(HTTPStatus.OK, {"message": rescuer.stop()})
+            else:
+                rescuer.forget(str(body.get("file") or ""))
+                self._json(HTTPStatus.OK, {"ok": True})
+        elif m := re.fullmatch(r"/api/(rescue|mysql-rescue)/job/(job-[\w.-]{1,120})/(open|data|import|clean|delete)", path):
+            kind, job, action = m.group(1), m.group(2), m.group(3)
+            rescuer = app.rescuer(kind)
             if action == "clean":
-                self._json(HTTPStatus.OK, {"message": app.rescue.clean_job(job)})
+                self._json(HTTPStatus.OK, {"message": rescuer.clean_job(job)})
             elif action == "delete":
-                self._json(HTTPStatus.OK, {"message": app.rescue.delete_job(job)})
+                self._json(HTTPStatus.OK, {"message": rescuer.delete_job(job)})
             elif action == "open":
-                self._json(HTTPStatus.OK, {"message": app.rescue.open(job, str(body.get("what") or "folder"))})
+                self._json(HTTPStatus.OK, {"message": rescuer.open(job, str(body.get("what") or "folder"))})
             elif action == "data":
                 self._json(HTTPStatus.OK, {"file": app.rescue_to_data(job, str(body.get("key") or ""))})
             else:
                 service, database = str(body.get("service") or ""), str(body.get("database") or "").strip()
-                task(f"Import into {database}", app.rescue_import, job, service, database, success=lambda msg: msg)
+                key = str(body.get("key") or "sql_dump")
+                task(f"Import into {database}", app.rescue_import, job, service, database, kind, key, success=lambda msg: msg)
         elif path == "/api/data/pick":
             self._json(HTTPStatus.OK, {"file": app.pick_data_file()})
         elif m := re.fullmatch(r"/api/data/([0-9a-f]{16})/([a-z-]+)", path):

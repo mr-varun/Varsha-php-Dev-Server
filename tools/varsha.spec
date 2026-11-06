@@ -16,6 +16,8 @@ datas = [
     (str(SRC / "varsha" / "data" / "access_odbc.py"), "varsha/data"),
     # run by path under the MDB rescue tool's own Python
     (str(SRC / "varsha" / "data" / "rescue_runner.py"), "varsha/data"),
+    # and the MySQL rescue tool's
+    (str(SRC / "varsha" / "data" / "mysql_rescue_runner.py"), "varsha/data"),
     (str(REPO / "etc" / "templates"), "etc/templates"),
     (str(REPO / "config" / "services.json"), "config"),
     (str(REPO / "config" / "settings.json"), "config"),

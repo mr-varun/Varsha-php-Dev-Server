@@ -189,7 +189,7 @@ function renderRescueJobs() {
   if (!jobs.length) { box.innerHTML = ""; return; }
   const working = RES.listing.jobs_working || 0;
   box.innerHTML = `<h2 class="section-title">Rescue jobs</h2>
-    <p class="muted rescue-jobs-note">${plural(jobs.length, "job")} use <b>${fmtBytes(RES.listing.jobs_size || 0)}</b>${working
+    <p class="muted rescue-jobs-note">${plural(jobs.length, "job")} ${jobs.length === 1 ? "uses" : "use"} <b>${fmtBytes(RES.listing.jobs_size || 0)}</b>${working
       ? `, of which <b>${fmtBytes(working)}</b> are working files (the tool's copies and stage folders) that <b>Clean</b> removes` : ""}.
       Nothing is deleted unless you choose it.</p>
     <div class="rescue-joblist">${jobs.map((j) => {

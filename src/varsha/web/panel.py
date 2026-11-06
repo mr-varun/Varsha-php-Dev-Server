@@ -33,6 +33,7 @@ from varsha.php.errors import PhpErrorWatcher
 from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
+from varsha.data.mysql_rescue import MysqlRescueManager
 from varsha.data.rescue import RescueManager
 from varsha.data.sqlite_files import DataFiles
 from varsha.services.importer import Importer
@@ -115,6 +116,8 @@ class PanelApp:
         self.git = SiteGit()
         self.data = DataFiles(paths)
         self.rescue = RescueManager(paths, notify=lambda data: self.events.publish("rescue", data))
+        self.mysql_rescue = MysqlRescueManager(paths, notify=lambda data: self.events.publish("mysql_rescue", data),
+                                               live_data_dirs=self._live_data_dirs)
         self.on_quit = on_quit
         self._pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="panel-task")
         self._task_ids = itertools.count(1)
@@ -274,17 +277,40 @@ class PanelApp:
 
     # ------------------------------------------------------------------ MDB Rescue
 
-    def pick_rescue_file(self) -> dict[str, Any] | None:
+    def rescuer(self, kind: str) -> RescueManager:
+        """The rescue tool behind a page: "rescue" (MDB Rescue) or "mysql-rescue"."""
+        if kind == "mysql-rescue":
+            return self.mysql_rescue
+        if kind == "rescue":
+            return self.rescue
+        raise ValueError("Unknown rescue tool")
+
+    def _live_data_dirs(self) -> list[tuple[str, Path]]:
+        """Data folders of the databases that are running (MySQL Rescue refuses those)."""
+        live = []
+        for status in self.manager.statuses():
+            if status.is_database and status.state.value in ("running", "starting", "stopping"):
+                defn = self.manager.definition(status.id)
+                if defn.data_dir:
+                    live.append((defn.name, self.paths.root / defn.data_dir))
+        return live
+
+    def pick_rescue_file(self, kind: str = "rescue") -> dict[str, Any] | None:
         if self.folder_picker is None:
             raise ServiceError("The file dialog isn't available")
-        chosen = self.folder_picker("Choose the damaged Access database", "file",
-                                    "Access databases (*.mdb *.mde);;Disk images and fragments (*.img *.bin *.dd *.raw *.001);;"
-                                    "All files (*)")
-        return self.rescue.register(chosen) if chosen else None
+        rescuer = self.rescuer(kind)
+        if kind == "mysql-rescue":
+            chosen = self.folder_picker("Choose the damaged MySQL / MariaDB data folder")
+        else:
+            chosen = self.folder_picker("Choose the damaged Access database", "file",
+                                        "Access databases (*.mdb *.mde);;Disk images and fragments (*.img *.bin *.dd *.raw *.001);;"
+                                        "All files (*)")
+        return rescuer.register(chosen) if chosen else None
 
-    def rescue_listing(self) -> dict[str, Any]:
-        jobs = self.rescue.jobs()
-        return {**self.rescue.status(), "recent": self.rescue.recent(), "jobs": jobs,
+    def rescue_listing(self, kind: str = "rescue") -> dict[str, Any]:
+        rescuer = self.rescuer(kind)
+        jobs = rescuer.jobs()
+        return {**rescuer.status(), "recent": rescuer.recent(), "jobs": jobs,
                 "jobs_size": sum(j["size"] for j in jobs), "jobs_working": sum(j["working"] for j in jobs),
                 "databases": [{"id": s.id, "name": s.name, "port": s.ports[0] if s.ports else None,
                                "running": s.state.value == "running"}
@@ -296,11 +322,15 @@ class PanelApp:
             raise ValueError("That result can't be opened on the Data page")
         return self.data.register(str(self.rescue.output_path(job, key)))
 
-    def rescue_import(self, job: str, service_id: str, database: str) -> str:
-        return self.databases.import_into(service_id, self.rescue.output_path(job, "sql_dump"), database)
+    def rescue_import(self, job: str, service_id: str, database: str, kind: str = "rescue", key: str = "sql_dump") -> str:
+        """Import a rescued .sql dump into a NEW database (MDB: "sql_dump"; MySQL: "sql:<database>")."""
+        if not (key == "sql_dump" or key.startswith("sql:")):
+            raise ValueError("That result isn't a .sql dump")
+        return self.databases.import_into(service_id, self.rescuer(kind).output_path(job, key), database)
 
     def shutdown(self) -> None:
         self.rescue.shutdown()
+        self.mysql_rescue.shutdown()
         self.php_errors.stop()
         self.scheduler.stop()
         self.mail_watch.stop()

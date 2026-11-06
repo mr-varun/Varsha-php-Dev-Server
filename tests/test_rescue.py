@@ -138,7 +138,7 @@ def test_files_and_setup_are_checked(manager: RescueManager, tmp_path: Path) -> 
     inside.write_bytes(b"x")
     with pytest.raises(RescueError, match="data folder"):
         manager.register(str(inside))
-    with pytest.raises(RescueError, match="Pick the file again"):
+    with pytest.raises(RescueError, match="Pick it again"):
         manager.start("0" * 16, "recommended", {})
     empty = RescueManager(AppPaths(tmp_path / "empty"))
     assert "isn't in bin" in empty.available()

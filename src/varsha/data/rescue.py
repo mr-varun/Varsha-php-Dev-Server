@@ -99,9 +99,9 @@ def prune_job(folder: Path) -> int:
     return freed
 
 
-def find_tool(paths: AppPaths) -> Path | None:
-    for folder in sorted(paths.bin.glob("mdb-rescue*"), reverse=True):
-        if (folder / "app" / "mdb_rescue.py").is_file():
+def find_tool(paths: AppPaths, pattern: str = "mdb-rescue*", entry: str = "mdb_rescue.py") -> Path | None:
+    for folder in sorted(paths.bin.glob(pattern), reverse=True):
+        if (folder / "app" / entry).is_file():
             return folder
     return None
 
@@ -123,11 +123,23 @@ def stages_for(preset: str, sql: bool, mdb: bool) -> list[str]:
 
 
 class RescueManager:
+    """One rescue tool in bin\\<TOOL_DIR>\\, run one job at a time. Subclasses (MySQL Rescue) change
+    the class attributes and the few methods that know the tool's request and report format."""
+    TOOL_DIR = "mdb-rescue"
+    ENTRY = "mdb_rescue.py"
+    SYNC = "sync-mdb-rescue.cmd"
+    JOBS = "mdb-rescue-jobs"
+    RECENT = "rescue-recent.json"
+    LABEL = "MDB rescue"
+    RUNNER = RUNNER
+    STAGE_NAMES = STAGE_NAMES
+    STAGE_ORDER = STAGE_ORDER
+
     def __init__(self, paths: AppPaths, notify: Callable[[dict[str, Any]], None] | None = None) -> None:
         self.paths = paths
         self.notify = notify or (lambda _data: None)
-        self.jobs_dir = paths.data / "mdb-rescue-jobs"
-        self._recent_file = paths.data / "rescue-recent.json"
+        self.jobs_dir = paths.data / self.JOBS
+        self._recent_file = paths.data / self.RECENT
         self._files: dict[str, Path] = {e["id"]: Path(e["path"]) for e in self._load_recent()}
         self._lock = threading.Lock()
         self._proc: subprocess.Popen[bytes] | None = None
@@ -138,17 +150,18 @@ class RescueManager:
 
     @property
     def tool(self) -> Path | None:
-        return find_tool(self.paths)
+        return find_tool(self.paths, self.TOOL_DIR + "*", self.ENTRY)
 
     def available(self) -> str:
         """"" when rescues can run, else why not."""
         tool = self.tool
         if tool is None:
-            return "The MDB rescue tool isn't in bin\\mdb-rescue\\ (copy it there with tools\\sync-mdb-rescue.cmd)."
+            return (f"The {self.LABEL} tool isn't in bin\\{self.TOOL_DIR}\\ "
+                    f"(copy it there with tools\\{self.SYNC}).")
         if tool_python(tool) is None:
-            return "bin\\mdb-rescue\\runtime\\python64\\ is missing (copy the tool with its runtime folder)."
-        if not RUNNER.is_file():
-            return "rescue_runner.py is missing from this varsha build"
+            return f"bin\\{self.TOOL_DIR}\\runtime\\python64\\ is missing (copy the tool with its runtime folder)."
+        if not self.RUNNER.is_file():
+            return f"{self.RUNNER.name} is missing from this varsha build"
         return ""
 
     # ------------------------------------------------------------------ files
@@ -172,11 +185,7 @@ class RescueManager:
             path = Path(raw).resolve(strict=True)
         except OSError:
             raise RescueError(f"{raw} doesn't exist") from None
-        if not path.is_file():
-            raise RescueError(f"{path} isn't a file")
-        data = self.paths.data.resolve()
-        if data in path.parents:
-            raise RescueError("Files inside varsha's data folder can't be rescued here")
+        self._check_target(path)
         file_id = self.file_id(path)
         self._files[file_id] = path
         recent = [e for e in self._load_recent() if e["id"] != file_id]
@@ -184,6 +193,12 @@ class RescueManager:
         self._recent_file.parent.mkdir(parents=True, exist_ok=True)
         self._recent_file.write_text(json.dumps(recent[:MAX_RECENT], indent=2), encoding="utf-8")
         return self._describe(file_id, path)
+
+    def _check_target(self, path: Path) -> None:
+        if not path.is_file():
+            raise RescueError(f"{path} isn't a file")
+        if self.paths.data.resolve() in path.parents:
+            raise RescueError("Files inside varsha's data folder can't be rescued here")
 
     def _describe(self, file_id: str, path: Path) -> dict[str, Any]:
         try:
@@ -207,10 +222,9 @@ class RescueManager:
         if problem:
             raise RescueError(problem)
         path = self._files.get(file_id)
-        if path is None or not path.is_file():
-            raise RescueError("Pick the file again (it isn't there any more)")
-        sql, mdb, csv_out = bool(options.get("sql")), bool(options.get("mdb")), bool(options.get("csv"))
-        steps = stages_for(preset, sql, mdb)
+        if path is None or not path.exists():
+            raise RescueError("Pick it again (it isn't there any more)")
+        request, shown, summary = self._prepare(path, preset, options)
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 raise RescueError("A rescue is already running: wait for it or stop it first")
@@ -219,25 +233,32 @@ class RescueManager:
             python = tool_python(tool)
             assert python is not None
             self.jobs_dir.mkdir(parents=True, exist_ok=True)
-            request = {"file": str(path), "out": str(self.jobs_dir), "steps": steps,
-                       "password": str(options.get("password") or "") or None, "csv": csv_out, "sql": sql, "mdb": mdb,
-                       "deleted": bool(options.get("deleted"))}
-            proc = subprocess.Popen([str(python), "-I", "-X", "utf8", str(RUNNER), str(tool)], stdin=subprocess.PIPE,
+            request["out"] = str(self.jobs_dir)
+            proc = subprocess.Popen([str(python), "-I", "-X", "utf8", str(self.RUNNER), str(tool)], stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(tool),
                                     creationflags=CREATE_NO_WINDOW)
             assert proc.stdin is not None
             proc.stdin.write((json.dumps(request) + "\n").encode("utf-8"))
             proc.stdin.flush()
             self._proc = proc
-            shown = {"copy", "diagnose", "report", *steps, *(["merge"] if set(steps) & {"salvage", "raw"} else [])}
             self._run = {"file": path.name, "file_id": file_id, "preset": preset,
-                         "steps": sorted(shown, key=STAGE_ORDER.index),  # the order the tool runs them in
+                         "steps": shown,  # the order the tool runs them in
                          "status": "running", "started": time.time(), "job": None, "stages": {}, "log": deque(maxlen=LOG_LINES),
                          "stage": "copy", "error": ""}
-        threading.Thread(target=self._follow, args=(proc,), name="mdb-rescue", daemon=True).start()
-        logger.info("MDB rescue started for %s (%s)", path, ", ".join(steps) or "diagnose only")
+        threading.Thread(target=self._follow, args=(proc,), name=self.TOOL_DIR, daemon=True).start()
+        logger.info("%s started for %s (%s)", self.LABEL, path, summary)
         self._push(force=True)
         return f"Rescue of {path.name} started"
+
+    def _prepare(self, path: Path, preset: str, options: dict[str, Any]) -> tuple[dict[str, Any], list[str], str]:
+        """The runner's request, the stages the page shows (in order) and a summary for the log."""
+        sql, mdb, csv_out = bool(options.get("sql")), bool(options.get("mdb")), bool(options.get("csv"))
+        steps = stages_for(preset, sql, mdb)
+        request = {"file": str(path), "steps": steps,
+                   "password": str(options.get("password") or "") or None, "csv": csv_out, "sql": sql, "mdb": mdb,
+                   "deleted": bool(options.get("deleted"))}
+        shown = {"copy", "diagnose", "report", *steps, *(["merge"] if set(steps) & {"salvage", "raw"} else [])}
+        return request, sorted(shown, key=STAGE_ORDER.index), ", ".join(steps) or "diagnose only"
 
     def _follow(self, proc: subprocess.Popen[bytes]) -> None:
         assert proc.stdout is not None
@@ -278,7 +299,7 @@ class RescueManager:
             self._run["finished"] = time.time() if self._run else None
             if self._run is not None:
                 self._run["settled"] = True  # the tool's process is gone: the job folder won't change any more
-        logger.info("MDB rescue finished: %s", self._run["status"] if self._run else "?")
+        logger.info("%s finished: %s", self.LABEL, self._run["status"] if self._run else "?")
         self._push(force=True)
 
     def _push(self, force: bool = False) -> None:
@@ -320,7 +341,7 @@ class RescueManager:
             run = dict(self._run) if self._run else None
         if run:
             run["log"] = list(run["log"])[-200:]
-            run["stage_names"] = {s: STAGE_NAMES.get(s, s) for s in run["steps"]}
+            run["stage_names"] = {s: self.STAGE_NAMES.get(s, s) for s in run["steps"]}
         return {"available": self.available(), "run": run}
 
     # ------------------------------------------------------------------ results
@@ -339,15 +360,20 @@ class RescueManager:
             return out
         for folder in sorted(self.jobs_dir.glob("job-*"), key=lambda p: p.stat().st_mtime, reverse=True)[:50]:
             report = self._report(folder)
-            totals = report.get("totals") or {}
-            out.append({"job": folder.name, "source": Path(str(report.get("source") or "")).name or folder.name,
+            out.append({"job": folder.name, "source": self._source_label(str(report.get("source") or "")) or folder.name,
                         "size": tree_size(folder), "working": working_size(folder),
                         "status": report.get("status") or ("running" if self._is_current(folder) else "unknown"),
-                        "started": report.get("started") or "", "tables": totals.get("tables"),
-                        "rows_found": totals.get("rows_found"), "rows_recovered": totals.get("rows_recovered"),
-                        "percent": totals.get("percent"), "rows_damaged": totals.get("rows_damaged"),
-                        "modified": folder.stat().st_mtime})
+                        "started": report.get("started") or "", "modified": folder.stat().st_mtime,
+                        **self._summary(report.get("totals") or {})})
         return out
+
+    @staticmethod
+    def _source_label(source: str) -> str:
+        return Path(source).name
+
+    @staticmethod
+    def _summary(totals: dict[str, Any]) -> dict[str, Any]:
+        return {key: totals.get(key) for key in ("tables", "rows_found", "rows_recovered", "percent", "rows_damaged")}
 
     def _finished_dir(self, job: str) -> Path:
         folder = self.job_dir(job)
@@ -394,12 +420,15 @@ class RescueManager:
             log = (folder / "log.txt").read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
         except OSError:
             log = []
-        diagnosis = report.get("diagnosis") or {}
         return {"job": job, "status": report.get("status") or "unknown", "source": report.get("source") or "",
                 "started": report.get("started") or "", "totals": report.get("totals") or {},
-                "tables": report.get("tables") or [], "outputs": outputs, "log": log,
-                "verdict": diagnosis.get("verdict") or "", "warnings": (diagnosis.get("warnings") or [])[:20],
-                "has_report": (folder / "report.html").is_file()}
+                "outputs": outputs, "log": log, "has_report": (folder / "report.html").is_file(), **self._detail(report)}
+
+    @staticmethod
+    def _detail(report: dict[str, Any]) -> dict[str, Any]:
+        diagnosis = report.get("diagnosis") or {}
+        return {"tables": report.get("tables") or [], "verdict": diagnosis.get("verdict") or "",
+                "warnings": (diagnosis.get("warnings") or [])[:20]}
 
     def output_path(self, job: str, key: str) -> Path:
         folder = self.job_dir(job)
