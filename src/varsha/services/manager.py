@@ -298,7 +298,10 @@ class ServiceManager:
         """Take over services still running from an earlier varsha session.
 
         Only processes whose exe lives inside the varsha folder are considered, so a MySQL
-        from Laragon or WAMP is never mistaken for ours. Their output still lands in
+        from Laragon or WAMP is never mistaken for ours, and their command line must name the
+        service's own config file (or data folder): another server started from varsha's bin
+        (MySQL Rescue's temporary server, a test, the import wizard's copy) is never adopted.
+        Their output still lands in
         logs\\<id>.log because they inherited that file handle when they were started.
         """
         targets: dict[str, _Runtime] = {}
@@ -326,6 +329,9 @@ class ServiceManager:
             if not exe or proc.pid in own:
                 continue
             rt = targets.get(os.path.normcase(os.path.abspath(exe)))
+            if rt is not None and not self._runs_our_config(rt.defn, proc.info.get("cmdline") or []):
+                logger.info("Not adopting %s (PID %s): it runs with another configuration", rt.defn.id, proc.pid)
+                rt = None
             if rt is None and module_targets:
                 cmdline = proc.info.get("cmdline") or []
                 for module, candidate in module_targets.items():
@@ -348,6 +354,15 @@ class ServiceManager:
                 rt.started_at = time.monotonic()
                 self._set(rt, ServiceState.RUNNING, f"adopted from an earlier session (PID {root.pid})")
             logger.info("Adopted running %s (PID %s)", sid, root.pid)
+
+    def _runs_our_config(self, defn: ServiceDef, cmdline: list[str]) -> bool:
+        """Does this command line belong to the service as varsha starts it (its config file, else
+        its data folder)? A service with neither is matched by its exe alone."""
+        marker = defn.config_file or defn.data_dir
+        if not marker:
+            return True
+        wanted = str(self.paths.root / marker).replace("\\", "/").lower().rstrip("/")
+        return wanted in " ".join(cmdline).replace("\\", "/").lower()
 
     # ------------------------------------------------------------------ monitor
 

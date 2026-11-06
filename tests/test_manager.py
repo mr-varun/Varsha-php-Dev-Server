@@ -198,3 +198,20 @@ def test_restart_running_restarts_only_what_runs(make_manager) -> None:  # type:
     assert manager.status("two").state.value == "stopped"  # stopped services stay stopped
     manager.stop_all()
     assert manager.restart_running() == []
+
+
+def test_only_processes_with_our_config_are_adopted(make_manager, app_paths) -> None:  # type: ignore[no-untyped-def]
+    import dataclasses
+    from conftest import free_port
+    manager = make_manager([fake_def("svc", free_port())])
+    root = str(app_paths.root).replace("\\", "/")
+    mysql = dataclasses.replace(fake_def("db", 1), config_file="etc/mysql-5.6/my.ini", data_dir="data/mysql-5.6")
+    ours = ["mysqld.exe", f"--defaults-file={root}/etc/mysql-5.6/my.ini", "--console"]
+    assert manager._runs_our_config(mysql, ours)  # noqa: SLF001
+    assert manager._runs_our_config(mysql, [a.upper().replace("/", "\\") for a in ours])  # case and slashes don't matter
+    rescue = ["mysqld.exe", "--defaults-file=C:/Temp/job/work/my-level1.ini"]  # MySQL Rescue's temporary server
+    test = ["mariadbd.exe", "--no-defaults", "--datadir=C:/Temp/bank-real/server-data", "--port=54108"]
+    assert not manager._runs_our_config(mysql, rescue) and not manager._runs_our_config(mysql, test)  # noqa: SLF001
+    mail = dataclasses.replace(fake_def("mail", 2), data_dir="data/mailpit")
+    assert manager._runs_our_config(mail, ["mailpit.exe", "--database", f"{root}/data/mailpit/mailpit.db"])  # noqa: SLF001
+    assert manager._runs_our_config(fake_def("plain", 3), ["anything"])  # neither: the exe alone decides  # noqa: SLF001
