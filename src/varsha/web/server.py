@@ -551,6 +551,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"import": app.pick_settings_import()})
         elif path == "/api/settings/import":
             self._json(HTTPStatus.OK, {"message": app.import_settings(body.get("token"))})
+        elif path == "/api/settings/timing":
+            self._json(HTTPStatus.OK, {"message": app.set_service_timing(body)})
         elif path == "/api/settings/log-size":
             self._json(HTTPStatus.OK, {"message": app.set_log_size(body.get("mb"))})
         elif path == "/api/settings/trim-logs":

@@ -612,6 +612,8 @@ class PanelApp:
         default_php = self.engine.default_php()
         return {**snapshot,
                 "open_panel_on_start": s.open_panel_on_start, "quit_action": s.quit_action, "tld": s.tld,
+                "max_auto_restarts": s.max_auto_restarts, "start_timeout": int(s.start_timeout),
+                "stop_timeout": int(s.stop_timeout), "stable_after": int(s.stable_after),
                 "log_max_mb": round(s.log_max_bytes / MB, 2), "logs": proc_utils.logs_usage(self.paths.logs),
                 "php_timezone": s.php_timezone, "timezone_overridden": overridden,
                 "timezones": app_settings.php_timezones(default_php.php_exe if default_php else None),
@@ -705,6 +707,28 @@ class PanelApp:
             return note + " Restart varsha to use them."
         threading.Timer(1.0, self.restart_hook).start()  # the answer reaches the page first
         return note + " varsha restarts now to use them (services keep running)."
+
+    TIMING_LIMITS = {"max_auto_restarts": (0, 10), "start_timeout_seconds": (5, 600), "stop_timeout_seconds": (5, 300)}
+
+    def set_service_timing(self, body: dict[str, Any]) -> str:
+        """Crash restarts and start/stop timeouts; the service manager reads them live."""
+        values: dict[str, int] = {}
+        for key, (low, high) in self.TIMING_LIMITS.items():
+            raw = body.get(key)
+            try:
+                number = int(str(raw).strip())
+            except (TypeError, ValueError):
+                raise ValueError(f"{key.replace('_', ' ')} must be a whole number") from None
+            if not low <= number <= high:
+                raise ValueError(f"{key.replace('_', ' ').replace(' seconds', '')} must be from {low} to {high}")
+            values[key] = number
+        self._apply_settings(dict(values), max_auto_restarts=values["max_auto_restarts"],
+                             start_timeout=float(values["start_timeout_seconds"]),
+                             stop_timeout=float(values["stop_timeout_seconds"]))
+        restarts = values["max_auto_restarts"]
+        return ((f"A crashed service is restarted up to {restarts} time{'s' if restarts != 1 else ''}" if restarts
+                 else "Crashed services are not restarted")
+                + f"; start waits {values['start_timeout_seconds']} s, a clean stop {values['stop_timeout_seconds']} s")
 
     def set_log_size(self, value: Any) -> str:
         try:

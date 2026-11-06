@@ -72,6 +72,32 @@ function drawSettings() {
     </section>
 
     <section class="card settings-card">
+      <div class="card-head"><h3 class="card-title">Crash restarts and timeouts</h3></div>
+      <form data-s="timing-form">
+        <div class="settings-row">
+          <div class="grow"><b>Restart a crashed service</b>
+            <small class="muted">Up to this many times in a row (0 = never). The count starts over once it has run for ${d.stable_after} s.</small></div>
+          <label class="row settings-unit"><input class="input mono settings-num" name="max_auto_restarts" type="number" min="0" max="10"
+            value="${d.max_auto_restarts}" aria-label="Crash restarts"><span class="muted">times</span></label>
+        </div>
+        <div class="settings-row">
+          <div class="grow"><b>Wait for a service to start</b>
+            <small class="muted">Then it is reported as failed. Raise it for a big database that is slow to start.</small></div>
+          <label class="row settings-unit"><input class="input mono settings-num" name="start_timeout_seconds" type="number" min="5" max="600"
+            value="${d.start_timeout}" aria-label="Start timeout in seconds"><span class="muted">s</span></label>
+        </div>
+        <div class="settings-row">
+          <div class="grow"><b>Wait for a clean stop</b>
+            <small class="muted">A service that hasn't stopped by then is ended by force.</small></div>
+          <label class="row settings-unit"><input class="input mono settings-num" name="stop_timeout_seconds" type="number" min="5" max="300"
+            value="${d.stop_timeout}" aria-label="Stop timeout in seconds"><span class="muted">s</span></label>
+        </div>
+        <div class="row settings-actions"><button class="btn btn-yellow" type="submit">Save</button>
+          <span class="muted">Applies at once, also to running services.</span></div>
+      </form>
+    </section>
+
+    <section class="card settings-card">
       <div class="card-head"><h3 class="card-title">Control panel</h3></div>
       <div class="settings-row">
         <div class="grow"><b>Port</b>
@@ -104,8 +130,9 @@ function drawSettings() {
       <div class="card-head"><h3 class="card-title">Sites</h3></div>
       <div class="settings-row">
         <div class="grow"><b>Address ending (TLD)</b>
-          <small class="muted">Every folder in <code>www\\</code> becomes <code>folder.${esc(d.tld)}</code>. Changing it renames every site,
-            its HTTPS certificate, the hosts entries and the DNS route. Your projects' own settings (APP_URL in .env) don't change.</small></div>
+          <small class="muted">Your sites open as <code>name.${esc(d.tld)}</code> (the folder <code>www\\shop</code> is <code>shop.${esc(d.tld)}</code>).
+            Changing the ending renames all of them; varsha updates their HTTPS certificates, the hosts file and DNS for you.
+            Your projects' own URLs (APP_URL in .env, a WordPress site URL) you change yourself. Best kept as <code>.test</code>.</small></div>
         <form class="row" data-s="tld-form">
           <span class="settings-tld-dot">.</span>
           <input class="input mono settings-tld" name="tld" value="${esc(d.tld)}" spellcheck="false" autocomplete="off"
@@ -154,7 +181,7 @@ function drawSettings() {
         <span class="muted" id="settings-notify-note">The panel's own messages always show.</span></div>
     </section>
 
-    <section class="card settings-card settings-wide">
+    <section class="card settings-card">
       <div class="card-head"><h3 class="card-title">Export / import</h3></div>
       <div class="settings-row">
         <div class="grow"><b>All of varsha's settings in one .zip</b>
@@ -313,6 +340,9 @@ document.addEventListener("submit", async (event) => {
     else if (form.dataset.s === "backup-form") await saveSettingForm("/api/settings/backup-dir", { folder: data.get("folder") });
     else if (form.dataset.s === "tld-form") await tldDialog(String(data.get("tld") || ""));
     else if (form.dataset.s === "log-form") await saveSettingForm("/api/settings/log-size", { mb: data.get("mb") });
+    else if (form.dataset.s === "timing-form") {
+      await saveSettingForm("/api/settings/timing", Object.fromEntries(["max_auto_restarts", "start_timeout_seconds", "stop_timeout_seconds"].map((k) => [k, data.get(k)])));
+    }
   } catch (err) {
     toast({ ok: false, title: "Settings", message: err.message });
   }

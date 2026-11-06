@@ -256,3 +256,21 @@ def test_only_apache_has_a_reload_button_action(panel) -> None:  # type: ignore[
     client.login()
     status, body = client.post("/api/services/svc/reload")
     assert status == 400 and "Only Apache" in body["error"]
+
+
+def test_crash_restarts_and_timeouts_apply_at_once(panel) -> None:  # type: ignore[no-untyped-def]
+    import json
+    app, client = panel
+    client.login()
+    good = {"max_auto_restarts": 5, "start_timeout_seconds": 90, "stop_timeout_seconds": 30}
+    for bad in ({**good, "max_auto_restarts": 11}, {**good, "start_timeout_seconds": 2},
+                {**good, "stop_timeout_seconds": "soon"}):
+        assert client.post("/api/settings/timing", bad)[0] == 400
+    status, body = client.post("/api/settings/timing", good)
+    assert status == 200 and "up to 5 times" in body["message"]
+    s = app.manager.settings
+    assert (s.max_auto_restarts, s.start_timeout, s.stop_timeout) == (5, 90.0, 30.0)  # the manager reads them live
+    saved = json.loads(app.paths.settings_file.read_text(encoding="utf-8"))
+    assert (saved["max_auto_restarts"], saved["start_timeout_seconds"], saved["stop_timeout_seconds"]) == (5, 90, 30)
+    assert client.get("/api/settings")[1]["start_timeout"] == 90
+    assert "not restarted" in client.post("/api/settings/timing", {**good, "max_auto_restarts": 0})[1]["message"]
