@@ -55,7 +55,7 @@ MAIL_CSP = ("default-src 'none'; img-src data:{remote}; style-src 'unsafe-inline
 MAX_UPLOAD = 4 * 1024 * 1024 * 1024
 REFUSE_DRAIN_LIMIT = 64 * 1024  # after refusing a POST, read at most this much before closing
 REFUSE_LINGER_SECONDS = 2
-SERVICE_ACTIONS = {"start", "stop", "restart", "backup", "password", "heidisql", "restore",
+SERVICE_ACTIONS = {"start", "stop", "restart", "reload", "backup", "password", "heidisql", "restore",
                    "autobackup", "autobackup-run"}
 
 
@@ -425,6 +425,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             name = mgr.definition(sid).name
             if action in ("start", "stop", "restart"):
                 task(f"{action.capitalize()} {name}", getattr(mgr, action), sid, sid=sid)
+            elif action == "reload":  # Apache only: new config, httpd -t, graceful restart (no dropped requests)
+                if mgr.definition(sid).type != "apache":
+                    raise ValueError("Only Apache has a graceful reload")
+                task(f"Reload {name}", mgr.reload, sid, success=lambda r: f"{name} reloaded" if r == "reloaded" or "graceful" in str(r) else f"{name}: {r}", sid=sid)
             elif action == "backup":
                 task(f"Back up {name}", app.databases.backup, sid,
                      success=lambda p: f"Saved {p.name}", sid=sid)

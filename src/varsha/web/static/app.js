@@ -290,7 +290,9 @@ function fillHome() {
     return `<div class="svc state-${s.state}${OFF.has(s.state) ? " is-off" : ""}">
         <div class="svc-top"><span class="led ${s.state}" title="${esc(s.label)}"></span>
           <span class="svc-name">${esc(s.name)}<small>${esc(s.version ? "v" + s.version : s.type)}</small></span>${switchFor(s)}</div>
-        <div class="svc-foot"><span class="unit-ports">${ports(s)}</span>${serviceMenu(s)}</div>
+        <div class="svc-foot"><span class="unit-ports">${ports(s)}</span>${s.type === "apache"
+          ? `<button class="btn btn-sm svc-reload" data-act="reload" data-id="${esc(s.id)}" ${s.state === "running" ? "" : "disabled"}
+              title="Reload Apache: new config, tested first, no downtime" aria-label="Reload ${esc(s.name)}">↻</button>` : ""}${serviceMenu(s)}</div>
         <div class="svc-msg" title="${esc(s.message)}">${esc(msg)}</div>
       </div>`;
   }).join("");
@@ -1813,7 +1815,7 @@ document.addEventListener("click", async (event) => {
   const { act: action, id, what, ref } = el.dataset;
   if (action !== "menu") openMenu = null;
   switch (action) {
-    case "start": case "stop": case "restart": await act(`/api/services/${id}/${action}`); break;
+    case "start": case "stop": case "restart": case "reload": await act(`/api/services/${id}/${action}`); break;
     case "start-all": await act("/api/all/start"); break;
     case "stop-all": await act("/api/all/stop"); break;
     case "restart-all": await act("/api/all/restart"); break;

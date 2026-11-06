@@ -249,3 +249,10 @@ def test_settings_export_and_import_through_the_panel(panel, tmp_path) -> None: 
     assert status == 200 and "Restart varsha" in data["message"]  # no restart hook in tests
     assert json.loads(app.paths.settings_file.read_text(encoding="utf-8"))["quit_action"] == "stop"
     assert list((app.paths.data / "settings-backups").iterdir())
+
+
+def test_only_apache_has_a_reload_button_action(panel) -> None:  # type: ignore[no-untyped-def]
+    _app, client = panel
+    client.login()
+    status, body = client.post("/api/services/svc/reload")
+    assert status == 400 and "Only Apache" in body["error"]
