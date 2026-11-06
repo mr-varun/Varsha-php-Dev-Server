@@ -5,7 +5,7 @@
   "max_auto_restarts": 3,
   "log_max_mb": 10,
   "default_php": "8.3.33",
-  "php_timezone": "UTC",
+  "php_timezone": "Asia/Kolkata",
   "tld": "test",
   "panel_port": 7700,
   "_phpmyadmin_extra_servers_example": [

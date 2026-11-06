@@ -43,7 +43,7 @@ class Settings:
     max_auto_restarts: int = 3
     log_max_bytes: int = 10 * 1024 * 1024
     default_php: str = "8.3"  # version prefix; Apache and phpMyAdmin use the newest match
-    php_timezone: str = "UTC"
+    php_timezone: str = "Asia/Kolkata"  # India Standard Time; the Settings page changes it
     phpmyadmin_extra_servers: tuple[ExtraDbServer, ...] = DEFAULT_EXTRA_SERVERS
     tld: str = "test"  # sites are <folder>.<tld>; never "dev" (a real TLD that forces HTTPS)
     panel_port: int = 7700  # the browser control panel, on 127.0.0.1 only

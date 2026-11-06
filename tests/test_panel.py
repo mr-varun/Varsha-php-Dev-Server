@@ -186,8 +186,8 @@ def test_settings_batch_two_apply_at_once(panel, tmp_path) -> None:  # type: ign
     assert saved["tray_notifications"] == {"failures": True, "php_errors": False, "mail": False}
     assert saved["backup_dir"] == str(folder)
     assert client.post("/api/settings/timezone", {"timezone": "not a zone!"})[0] == 400
-    assert client.post("/api/settings/timezone", {"timezone": "Asia/Kolkata"})[0] == 200
-    assert app.engine.settings.php_timezone == "Asia/Kolkata"  # the next php.ini uses it
+    assert client.post("/api/settings/timezone", {"timezone": "Europe/London"})[0] == 200
+    assert app.engine.settings.php_timezone == "Europe/London"  # the next php.ini uses it
     assert app.settings.panel_port == Settings().panel_port  # never touched by these saves
     status, body = client.post("/api/settings/notify-test", {})
     assert status in (400, 500) or "tray" in str(body)  # no tray in tests

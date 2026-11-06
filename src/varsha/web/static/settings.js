@@ -95,9 +95,7 @@ function drawSettings() {
           ${d.timezone_overridden.length ? `<small class="settings-warn">Your own php.ini setting for <code>date.timezone</code> wins for
             ${esc(d.timezone_overridden.join(", "))} (System → PHP settings).</small>` : ""}</div>
         <form class="row" data-s="tz-form">
-          <input class="input mono settings-tz" name="timezone" list="settings-zones" value="${esc(d.php_timezone)}"
-            spellcheck="false" autocomplete="off" aria-label="PHP timezone">
-          <datalist id="settings-zones">${d.timezones.map((z) => `<option value="${esc(z)}">`).join("")}</datalist>
+          ${timezoneSelect(d)}
           <button class="btn btn-yellow" type="submit">Save</button></form>
       </div>
     </section>
@@ -126,6 +124,29 @@ function drawSettings() {
         <button class="btn" data-s="notify-test">Send a test</button>
         <span class="muted" id="settings-notify-note">The panel's own messages always show.</span></div>
     </section>`;
+}
+
+// Every timezone PHP knows, grouped by region (Asia/Kolkata, the default, first). Without PHP's
+// list (no PHP build found) it falls back to a text field.
+function timezoneSelect(d) {
+  const current = d.php_timezone;
+  if (!d.timezones.length) {
+    return `<input class="input mono settings-tz" name="timezone" value="${esc(current)}" spellcheck="false" autocomplete="off" aria-label="PHP timezone">`;
+  }
+  const groups = new Map();
+  for (const zone of d.timezones) {
+    const region = zone.includes("/") ? zone.split("/")[0] : "Other";
+    if (!groups.has(region)) groups.set(region, []);
+    groups.get(region).push(zone);
+  }
+  const top = [["Asia/Kolkata", "India: Asia/Kolkata (IST, UTC+5:30)"], ["UTC", "UTC"]];
+  const known = new Set(d.timezones);
+  const inTop = top.some(([z]) => z === current && known.has(z));  // then only the top entry is selected
+  const option = (z, label, pick) => `<option value="${esc(z)}" ${pick && z === current ? "selected" : ""}>${esc(label || z.replace(/_/g, " "))}</option>`;
+  return `<select class="select settings-tz" name="timezone" aria-label="PHP timezone">
+      <optgroup label="Common">${top.filter(([z]) => known.has(z)).map(([z, l]) => option(z, l, true)).join("")}</optgroup>
+      ${[...groups].map(([region, zones]) => `<optgroup label="${esc(region)}">${zones.map((z) => option(z, "", !inTop)).join("")}</optgroup>`).join("")}
+    </select>`;
 }
 
 async function saveSettingForm(url, body) {

@@ -141,3 +141,11 @@ def test_backup_folder_checks(tmp_path: Path) -> None:
         app_settings.check_backup_dir(r"..\outside", root)
     with pytest.raises(ValueError, match="whole drive"):
         app_settings.check_backup_dir("C:\\", root)
+
+
+def test_the_default_timezone_is_india(tmp_path: Path) -> None:
+    from varsha.settings import Settings, load_settings
+    assert Settings().php_timezone == "Asia/Kolkata"
+    assert load_settings(tmp_path / "missing.json").php_timezone == "Asia/Kolkata"
+    default = json.loads((Path(__file__).parent.parent / "config" / "settings.json").read_text(encoding="utf-8"))
+    assert default["php_timezone"] == "Asia/Kolkata"  # what a fresh install gets

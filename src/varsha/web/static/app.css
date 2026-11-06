@@ -1077,7 +1077,7 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .myr-note { max-width: 520px; font-size: .85rem; color: var(--muted); white-space: normal; }
 .myr-attempts { margin-top: var(--s4); }
 .myr-attempts summary { cursor: pointer; font-weight: 700; }
-.settings-tz { width: 230px; }
+.settings-tz { width: 300px; min-height: 38px; }
 .settings-row-wrap { flex-wrap: wrap; }
 .settings-row-wrap > .grow { flex: 1 1 100%; }
 .settings-backup { flex: 1 1 100%; min-width: 0; }
