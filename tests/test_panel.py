@@ -213,3 +213,17 @@ def test_changing_the_tld_renames_everything_that_names_sites(panel, monkeypatch
     assert json.loads(app.paths.settings_file.read_text(encoding="utf-8"))["tld"] == "lan"
     assert client.get("/api/state")[1]["tld"] == "lan"
     assert "already" in client.post("/api/settings/tld", {"tld": "lan"})[1]["message"]
+
+
+def test_log_size_setting(panel) -> None:  # type: ignore[no-untyped-def]
+    import json
+    app, client = panel
+    client.login()
+    assert client.post("/api/settings/log-size", {"mb": 0})[0] == 400
+    assert client.post("/api/settings/log-size", {"mb": "lots"})[0] == 400
+    status, body = client.post("/api/settings/log-size", {"mb": 5})
+    assert status == 200 and "5 MB" in body["message"]
+    assert app.settings.log_max_bytes == app.manager.settings.log_max_bytes == 5 * 1024 * 1024
+    assert json.loads(app.paths.settings_file.read_text(encoding="utf-8"))["log_max_mb"] == 5
+    assert client.get("/api/settings")[1]["log_max_mb"] == 5
+    assert client.post("/api/settings/trim-logs", {})[0] == 200

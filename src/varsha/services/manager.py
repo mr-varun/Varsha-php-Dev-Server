@@ -360,8 +360,17 @@ class ServiceManager:
             self._monitor.join(timeout=5)
             self._monitor = None
 
+    LOG_TRIM_EVERY = 600.0  # seconds between log size checks (also once when monitoring starts)
+
     def _monitor_loop(self) -> None:
+        last_trim = 0.0
         while not self._stop_event.wait(self.settings.monitor_interval):
+            if time.monotonic() - last_trim >= self.LOG_TRIM_EVERY:
+                last_trim = time.monotonic()
+                try:
+                    proc_utils.trim_logs(self.paths.logs, self.settings.log_max_bytes)
+                except Exception:
+                    logger.exception("Trimming the logs failed")
             for rt in list(self._runtimes.values()):
                 # Skip services that are busy starting or stopping; never block the loop.
                 if not rt.lock.acquire(blocking=False):

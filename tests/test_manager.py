@@ -168,3 +168,21 @@ def test_missing_config_file_is_explained(make_manager: MakeManager) -> None:
     manager = make_manager([defn])
     with pytest.raises(ServiceError, match="config file etc/svc/svc.conf not found"):
         manager.start("svc")
+
+
+def test_logs_roll_over_even_while_a_process_holds_them(tmp_path: Path) -> None:
+    from varsha.services import process as proc_utils
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    big, small, own = logs / "apache.log", logs / "mailpit.log", logs / "varsha.log"
+    big.write_bytes(b"x" * 3000)
+    small.write_bytes(b"y" * 10)
+    own.write_bytes(b"z" * 3000)  # varsha's own log rotates itself
+    with open(big, "ab") as held:  # like a running service's inherited handle
+        assert proc_utils.trim_logs(logs, 1000) == ["apache.log"]
+        held.write(b"after")
+    assert (logs / "apache.log.1").read_bytes() == b"x" * 3000
+    assert big.read_bytes().strip(b"\0").endswith(b"after") and big.stat().st_size < 3000
+    assert small.read_bytes() == b"y" * 10 and own.stat().st_size == 3000
+    usage = proc_utils.logs_usage(logs)
+    assert usage["count"] == 4 and usage["biggest"][0]["size"] == 3000

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable, Sequence
@@ -40,17 +41,68 @@ def describe_exit_code(code: int | None) -> str:
     return f"exit code {code}"
 
 
-def rotate_log(log_path: Path, max_bytes: int) -> None:
-    """Keep one previous log as <name>.log.1 once the log grows past max_bytes."""
+def rotate_log(log_path: Path, max_bytes: int) -> bool:
+    """Keep one previous log as <name>.log.1 once the log grows past max_bytes. Returns True if
+    it rolled over.
+
+    A log a running process holds open can't be renamed on Windows, so then it is copied to .1
+    and emptied in place ("copytruncate"): the services append to it, so they carry on writing
+    at the new end. Lines written in the instant between the copy and the truncate are lost."""
     try:
         if log_path.stat().st_size <= max_bytes:
-            return
-        log_path.replace(log_path.with_name(log_path.name + ".1"))
-    except FileNotFoundError:
-        return
+            return False
+    except OSError:
+        return False
+    old = log_path.with_name(log_path.name + ".1")
+    try:
+        log_path.replace(old)
+        return True
+    except OSError:
+        pass
+    try:
+        with open(log_path, "r+b") as src:
+            with open(old, "wb") as dst:
+                shutil.copyfileobj(src, dst, 1024 * 1024)
+            src.seek(0)
+            src.truncate(0)
+        return True
     except OSError as exc:
-        # Fails if a process still holds the file open (Windows doesn't allow renaming then).
-        logger.warning("Could not rotate %s: %s", log_path, exc)
+        logger.warning("Could not trim %s: %s", log_path, exc)
+        return False
+
+
+APP_LOGS = ("varsha.log",)  # varsha's own log rotates itself (logging's RotatingFileHandler)
+
+
+def trim_logs(logs_dir: Path, max_bytes: int) -> list[str]:
+    """Roll over every *.log in the logs folder that is bigger than max_bytes; returns their names."""
+    trimmed = []
+    try:
+        candidates = sorted(logs_dir.glob("*.log"))
+    except OSError:
+        return trimmed
+    for path in candidates:
+        if path.name.lower() in APP_LOGS or not path.is_file():
+            continue
+        if rotate_log(path, max_bytes):
+            trimmed.append(path.name)
+    if trimmed:
+        logger.info("Logs over %d MB rolled over: %s", max_bytes // (1024 * 1024), ", ".join(trimmed))
+    return trimmed
+
+
+def logs_usage(logs_dir: Path) -> dict[str, object]:
+    """Total size of the logs folder and its biggest files, for the Settings page."""
+    files = []
+    try:
+        for path in logs_dir.iterdir():
+            if path.is_file():
+                files.append((path.name, path.stat().st_size))
+    except OSError:
+        pass
+    files.sort(key=lambda f: -f[1])
+    return {"total": sum(size for _n, size in files), "count": len(files),
+            "biggest": [{"name": n, "size": s} for n, s in files[:5]]}
 
 
 def spawn(cmd: Sequence[str], cwd: Path, log_path: Path) -> subprocess.Popen[bytes]:

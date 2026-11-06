@@ -534,6 +534,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.set_backup_dir(body.get("folder"))})
         elif path == "/api/settings/notify":
             self._json(HTTPStatus.OK, {"message": app.set_notify(body.get("kinds"))})
+        elif path == "/api/settings/log-size":
+            self._json(HTTPStatus.OK, {"message": app.set_log_size(body.get("mb"))})
+        elif path == "/api/settings/trim-logs":
+            self._json(HTTPStatus.OK, {"message": app.trim_logs()})
         elif path == "/api/settings/tld-preview":
             self._json(HTTPStatus.OK, app.tld_preview(body.get("tld")))
         elif path == "/api/settings/tld":

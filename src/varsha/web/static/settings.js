@@ -115,6 +115,21 @@ function drawSettings() {
     </section>
 
     <section class="card settings-card">
+      <div class="card-head"><h3 class="card-title">Logs</h3></div>
+      <div class="settings-row">
+        <div class="grow"><b>Maximum size of each log</b>
+          <small class="muted">A log in <code>logs\\</code> that grows past this is rolled over: the previous part is kept as <code>.log.1</code>
+            (one copy), checked every 10 minutes. The logs folder uses <span class="settings-em">${fmtBytes(d.logs.total)}</span> now${d.logs.biggest.length
+              ? ` (biggest: ${d.logs.biggest.slice(0, 3).map((f) => `${esc(f.name)} ${fmtBytes(f.size)}`).join(", ")})` : ""}.</small></div>
+        <form class="row" data-s="log-form">
+          <input class="input mono settings-port" name="mb" type="number" min="1" max="1024" step="any" value="${d.log_max_mb}" aria-label="Maximum log size in MB">
+          <span class="muted">MB</span>
+          <button class="btn btn-yellow" type="submit">Save</button>
+          <button class="btn" type="button" data-s="trim-logs">Trim now</button></form>
+      </div>
+    </section>
+
+    <section class="card settings-card">
       <div class="card-head"><h3 class="card-title">Backups</h3></div>
       <div class="settings-row settings-row-wrap">
         <div class="grow"><b>Backup folder</b>
@@ -231,6 +246,8 @@ document.addEventListener("click", async (event) => {
     } else if (s === "save-notify") {
       const kinds = [...$("#settings").querySelectorAll('[data-s="notify"]:checked')].map((x) => x.dataset.id);
       await saveSettingForm("/api/settings/notify", { kinds });
+    } else if (s === "trim-logs") {
+      await saveSettingForm("/api/settings/trim-logs", {});
     } else if (s === "notify-test") {
       toast({ ok: true, title: "Settings", message: (await api.post("/api/settings/notify-test", {})).message });
     }
@@ -263,6 +280,7 @@ document.addEventListener("submit", async (event) => {
     else if (form.dataset.s === "tz-form") await saveSettingForm("/api/settings/timezone", { timezone: data.get("timezone") });
     else if (form.dataset.s === "backup-form") await saveSettingForm("/api/settings/backup-dir", { folder: data.get("folder") });
     else if (form.dataset.s === "tld-form") await tldDialog(String(data.get("tld") || ""));
+    else if (form.dataset.s === "log-form") await saveSettingForm("/api/settings/log-size", { mb: data.get("mb") });
   } catch (err) {
     toast({ ok: false, title: "Settings", message: err.message });
   }

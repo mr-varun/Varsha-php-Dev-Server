@@ -48,6 +48,7 @@ from varsha.sites.manager import SiteManager
 from varsha.tunnel.manager import TunnelManager
 
 logger = logging.getLogger(__name__)
+MB = 1024 * 1024
 
 LOG_CHUNK = 256 * 1024
 
@@ -610,6 +611,7 @@ class PanelApp:
         default_php = self.engine.default_php()
         return {**snapshot,
                 "open_panel_on_start": s.open_panel_on_start, "quit_action": s.quit_action, "tld": s.tld,
+                "log_max_mb": round(s.log_max_bytes / MB, 2), "logs": proc_utils.logs_usage(self.paths.logs),
                 "php_timezone": s.php_timezone, "timezone_overridden": overridden,
                 "timezones": app_settings.php_timezones(default_php.php_exe if default_php else None),
                 "backup_dir": s.backup_dir, "backup_path": str(self.databases.backup_root),
@@ -665,6 +667,24 @@ class PanelApp:
         chosen = tuple(k for k in NOTIFY_KINDS if k in kinds)
         self._apply_settings({"tray_notifications": {k: k in chosen for k in NOTIFY_KINDS}}, notify=chosen)
         return "Tray notifications: " + (", ".join(NOTIFY_KINDS[k].split(" (")[0].lower() for k in chosen) if chosen else "none")
+
+    def set_log_size(self, value: Any) -> str:
+        try:
+            mb = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("The log size must be a number of MB") from None
+        if not 1 <= mb <= 1024:
+            raise ValueError("Choose from 1 to 1024 MB")
+        mb = int(mb) if mb == int(mb) else round(mb, 1)
+        self._apply_settings({"log_max_mb": mb}, log_max_bytes=int(mb * MB))
+        trimmed = proc_utils.trim_logs(self.paths.logs, self.settings.log_max_bytes)
+        return f"Logs roll over at {mb} MB" + (f" ({len(trimmed)} trimmed now)" if trimmed else "")
+
+    def trim_logs(self) -> str:
+        trimmed = proc_utils.trim_logs(self.paths.logs, self.settings.log_max_bytes)
+        if not trimmed:
+            return f"No log is over {self.settings.log_max_bytes // MB} MB"
+        return f"Trimmed {len(trimmed)} log{'s' if len(trimmed) != 1 else ''} (the previous part is kept as .1): " + ", ".join(trimmed)
 
     def tld_preview(self, value: Any) -> dict[str, Any]:
         """What a TLD change would do, for the warning dialog (nothing is changed)."""

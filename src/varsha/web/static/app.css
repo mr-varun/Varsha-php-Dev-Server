@@ -1091,3 +1091,4 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .settings-backup .input { min-width: 0; }
 .settings-tld { width: 140px; min-height: 38px; }
 .settings-tld-dot { font: 700 20px var(--mono); }
+.settings-row .settings-em { font-weight: 700; color: var(--text); }
