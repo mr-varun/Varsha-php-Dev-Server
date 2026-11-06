@@ -1105,3 +1105,18 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .settings-num { width: 90px; min-height: 38px; }
 .settings-unit { gap: var(--s2); align-items: center; }
 .settings-unit > span { width: 42px; }
+
+/* Import Banks Data (bankimport.js): a blank page with one big drop area, then the live log */
+.bank-page { display: flex; flex-direction: column; gap: var(--s4); }
+.bank-drop {
+  display: grid; place-items: center; min-height: 46vh; padding: var(--s6);
+  border: 3px dashed var(--edge); border-radius: var(--radius); background: var(--card); text-align: center;
+}
+.bank-drop-inner b { display: block; font-size: 22px; }
+.bank-drop-inner small { display: block; margin-top: var(--s2); }
+.bank-drop.is-over { background: var(--yellow); border-style: solid; }
+.bank-drop.is-busy { opacity: .6; }
+.bank-card .bank-progress { gap: var(--s3); align-items: center; margin-bottom: var(--s3); }
+.bank-bar { display: block; flex: 1 1 auto; width: 100%; min-width: 120px; }
+.bank-restore { gap: var(--s2); margin-bottom: var(--s3); flex-wrap: wrap; }
+.bank-log pre { height: min(46vh, 460px); }

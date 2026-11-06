@@ -65,16 +65,24 @@ class DatabaseTools:
         return sorted(name for name in (line.strip() for line in result.stdout.splitlines())
                       if name and name.lower() not in SYSTEM_DATABASES)
 
-    def backup(self, service_id: str, databases: Sequence[str] | None = None, auto: bool = False) -> Path:
+    def backup(self, service_id: str, databases: Sequence[str] | None = None, auto: bool = False,
+               filename: str | None = None) -> Path:
         """Dump this server to data/backups/<id>/[auto_]<id>_<timestamp>.sql.
 
-        `databases` limits the dump to those databases (default: every database, users included).
+        `databases` limits the dump to those databases (default: every database, users included);
+        `filename` names the file instead (letters, digits, . _ - only; never overwrites).
         """
         port = self._require_running(service_id)
         dump = self.manager.expand_tool(service_id, "dump")
         folder = self.backup_dir(service_id)
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / f"{AUTO_PREFIX if auto else ''}{service_id}_{time.strftime('%Y%m%d-%H%M%S')}.sql"
+        if filename:
+            safe = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(filename).name).strip("._") or f"{service_id}"
+            stem = safe[:-4] if safe.lower().endswith(".sql") else safe
+            target, k = folder / f"{stem}.sql", 2
+            while target.exists():
+                target, k = folder / f"{stem}-{k}.sql", k + 1
         if databases:
             bad = [d for d in databases if not DB_NAME_RE.fullmatch(d)]
             if bad:

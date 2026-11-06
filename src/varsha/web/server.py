@@ -40,6 +40,7 @@ STATIC_FILES = {
     "/static/data.js": ("data.js", "text/javascript; charset=utf-8"),
     "/static/rescue.js": ("rescue.js", "text/javascript; charset=utf-8"),
     "/static/mysqlrescue.js": ("mysqlrescue.js", "text/javascript; charset=utf-8"),
+    "/static/bankimport.js": ("bankimport.js", "text/javascript; charset=utf-8"),
     "/static/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
     "/static/logo.png": ("logo.png", "image/png"),
     "/favicon.ico": ("varsha.ico", "image/x-icon"),
@@ -189,6 +190,8 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.databases.list_databases(m.group(1))))
         elif m := re.fullmatch(r"/api/php/([A-Za-z0-9._-]+)", parts.path):
             self._guarded(lambda: self._json(HTTPStatus.OK, self.app.php_details(m.group(1))))
+        elif parts.path == "/api/bank-import":
+            self._guarded(lambda: self._json(HTTPStatus.OK, self.app.bankimport.status()))
         elif parts.path == "/api/settings/export":
             self._guarded(lambda: self._download(*self._export_settings()))
         elif parts.path == "/api/settings":
@@ -338,6 +341,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._refuse(HTTPStatus.FORBIDDEN, "cross-origin request refused")
             return
         path = urlsplit(self.path).path
+        if path == "/api/bank-import/upload":
+            self.close_connection = True  # a refused upload leaves its (large) body unread
+            self._guarded(self._bank_upload)
+            return
         if m := re.fullmatch(r"/api/services/([a-z0-9._-]+)/restore-upload", path):
             self.close_connection = True  # a refused upload leaves its (large) body unread
             self._guarded(lambda: self._restore_upload(m.group(1)))
@@ -547,6 +554,13 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.set_backup_dir(body.get("folder"))})
         elif path == "/api/settings/notify":
             self._json(HTTPStatus.OK, {"message": app.set_notify(body.get("kinds"))})
+        elif path == "/api/bank-import/new":
+            self._json(HTTPStatus.OK, {"run": app.bankimport.new_run()})
+        elif path == "/api/bank-import/start":
+            self._json(HTTPStatus.OK, {"message": app.bankimport.start(str(body.get("run") or ""))})
+        elif path == "/api/bank-import/restore":
+            database = str(body.get("database") or "")
+            task(f"Restore {database}", app.bankimport.restore, database, success=lambda msg: msg)
         elif path == "/api/settings/import-pick":
             self._json(HTTPStatus.OK, {"import": app.pick_settings_import()})
         elif path == "/api/settings/import":
@@ -692,6 +706,14 @@ class PanelHandler(BaseHTTPRequestHandler):
             threading.Thread(target=app.quit, args=(bool(body.get("stop_services")),), daemon=True).start()
         else:
             self._error(HTTPStatus.NOT_FOUND, "not found")
+
+    def _bank_upload(self) -> None:
+        """Import Banks Data: stream one dropped .sql (bankdb.sql / inventory1.sql) into its run folder."""
+        query = parse_qs(urlsplit(self.path).query)
+        run = (query.get("run") or [""])[0]
+        length = int(self.headers.get("Content-Length") or 0)
+        name = self.headers.get("X-Filename", "")
+        self._json(HTTPStatus.OK, self.app.bankimport.save_upload(run, name, self.rfile, length))
 
     def _restore_upload(self, sid: str) -> None:
         """Stream an uploaded .sql into data/backups/<id>/ and restore it."""

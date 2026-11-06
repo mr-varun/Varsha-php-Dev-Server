@@ -34,6 +34,7 @@ from varsha.php.errors import PhpErrorWatcher
 from varsha.schedule import Scheduler
 from varsha.services import process as proc_utils
 from varsha.services.database import DatabaseTools
+from varsha.bankimport import BankImport
 from varsha.data.mysql_rescue import MysqlRescueManager
 from varsha.data.rescue import RescueManager
 from varsha.data.sqlite_files import DataFiles
@@ -118,6 +119,8 @@ class PanelApp:
         self.git = SiteGit()
         self.data = DataFiles(paths)
         self.rescue = RescueManager(paths, notify=lambda data: self.events.publish("rescue", data))
+        self.bankimport = BankImport(paths, manager, self.databases,
+                                     notify=lambda data: self.events.publish("bank_import", data))
         self.mysql_rescue = MysqlRescueManager(paths, notify=lambda data: self.events.publish("mysql_rescue", data),
                                                live_data_dirs=self._live_data_dirs)
         self.on_quit = on_quit
