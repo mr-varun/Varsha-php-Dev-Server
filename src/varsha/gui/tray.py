@@ -60,7 +60,7 @@ class Tray:
         menu = self.menu
         menu.clear()
         self._add(menu, "Open control panel", self.open_panel, bold=True)
-        self._add(menu, "Import Banks Data", lambda: self.open_panel("bankimport"))
+        self._add(menu, "Import Banks Data", self.open_bank_window)
         menu.addSeparator()
         self._add(menu, "Start all", lambda: self.run("Start all", self.manager.start_all))
         self._add(menu, "Restart running services", lambda: self.run("Restart running services", self.manager.restart_running))
@@ -90,6 +90,16 @@ class Tray:
     def _activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
             self.open_panel()
+
+    def open_bank_window(self) -> None:
+        """The small, always-on-top Import Banks Data window (the full page if no Edge/Chrome)."""
+        from varsha.gui.mini_window import open_bank_window
+        try:
+            if open_bank_window(self.panel_url()):
+                return
+        except Exception:  # noqa: BLE001 - never lose the action over the window tricks
+            pass
+        self.open_panel("bankimport")
 
     def open_panel(self, page: str = "") -> None:
         """Open the control panel, on one of its pages (e.g. "bankimport") when given."""

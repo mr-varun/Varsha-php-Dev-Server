@@ -29,6 +29,9 @@ const FOLDER = "\ud83d\udcc2";
 
 let S = null;                 // last /api/state
 let view = (location.hash || "#stack").slice(1);
+// #bankmini: the tray's small "Import Banks Data" window (no top bar; varsha keeps it on top by its title)
+const MINI = view === "bankmini";
+if (MINI) { view = "bankimport"; document.documentElement.classList.add("mini-window"); }
 if (!VIEWS[view]) view = "stack";
 let openMenu = null;          // id of the open ⋯ menu
 let refreshTimer = null;
@@ -201,7 +204,7 @@ function renderShell() {
   $("#page-head").hidden = view === "stack";
   $("#title").textContent = VIEWS[view].title;
   $("#eyebrow").textContent = VIEWS[view].eyebrow;
-  document.title = view === "stack" ? "varsha" : `varsha \u00b7 ${VIEWS[view].title}`;
+  document.title = MINI ? "Import Banks Data - varsha mini" : view === "stack" ? "varsha" : `varsha \u00b7 ${VIEWS[view].title}`;
 
   const usable = S.services.filter((s) => !OFF.has(s.state));
   const running = usable.filter((s) => s.state === "running").length;
@@ -1558,7 +1561,7 @@ function go(next) {
   view = next;
   openMenu = null;
   setNavMenu(null);
-  history.replaceState(null, "", `#${next}`);
+  if (!MINI) history.replaceState(null, "", `#${next}`);
   $("#view").innerHTML = "";
   render();
   window.scrollTo({ top: 0 });

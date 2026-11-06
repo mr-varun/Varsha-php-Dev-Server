@@ -8,6 +8,8 @@ const BANK_FILES = ["bankdb.sql", "inventory1.sql"];
 
 function viewBankImportSkeleton() {
   return `<div id="bankimport" class="bank-page">
+    ${MINI ? `<div class="row bank-mini-head"><b class="grow">Import Banks Data</b>
+      <button class="btn btn-sm" data-b="close" title="Close this window (an import keeps running in varsha)">\u2715 Close</button></div>` : ""}
     <div id="bank-drop" class="bank-drop" tabindex="0" aria-label="Drop bankdb.sql and inventory1.sql here">
       <div class="bank-drop-inner"><b>Drop bankdb.sql and / or inventory1.sql here</b>
         <small class="muted" id="bank-drop-note"></small></div>
@@ -27,6 +29,8 @@ function drawBankImport() {
   if (!drop) return;
   const s = BANK.state || {};
   drop.classList.toggle("is-busy", bankBusy());
+  // once files are dropped, the drop area gives way to the log; "Import again" brings it back
+  drop.hidden = Boolean(BANK.uploading || (s.status && s.status !== "idle" && !BANK.again));
   $("#bank-drop-note").textContent = bankBusy()
     ? "An import is running…"
     : `Into ${s.service_name || "MySQL 5.6"}. Checked first; the current data is backed up, then replaced. Only the dropped ones change.`;
@@ -36,7 +40,7 @@ function drawBankImport() {
     box.innerHTML = `<div class="card bank-card"><div class="card-head"><h3 class="card-title">Uploading ${esc(u.name)}</h3>
         <span class="chip chip-blue">${fmtBytes(u.done)} of ${fmtBytes(u.total)}</span></div>
       <span class="rescue-bar bank-bar"><span class="rescue-fill" data-pct="${u.total ? Math.round((u.done / u.total) * 100) : 0}"></span></span></div>`;
-  } else if (!s.status || s.status === "idle") {
+  } else if (!s.status || s.status === "idle" || BANK.again) {
     box.innerHTML = "";
     return;
   } else {
@@ -54,6 +58,7 @@ function drawBankImport() {
           Restore ${esc(db)} (${esc(s.backups[db])})</button>`).join("")}</div>` : ""}
       ${Object.keys(s.backups || {}).length && !restore.length ? `<p class="muted bank-backups">Backups of the previous data: ${Object.values(s.backups).map((n) => `<code>${esc(n)}</code>`).join(", ")}</p>` : ""}
       <div class="terminal bank-log"><pre id="bank-log">${esc((s.log || []).join("\n"))}</pre></div>
+      ${s.status !== "running" ? `<div class="row bank-again"><button class="btn btn-yellow" data-b="again">Import again</button></div>` : ""}
     </div>`;
   }
   box.querySelectorAll(".rescue-fill").forEach((el) => { el.style.width = `${el.dataset.pct}%`; });  // CSP: no inline styles
@@ -102,6 +107,7 @@ async function bankDropped(fileList) {
       : "The same file was dropped twice. Nothing was changed." });
     return;
   }
+  BANK.again = false;
   try {
     const { run } = await api.post("/api/bank-import/new", {});
     for (const file of files.sort((a, b) => BANK_FILES.indexOf(a.name.toLowerCase()) - BANK_FILES.indexOf(b.name.toLowerCase()))) {
@@ -140,6 +146,12 @@ document.addEventListener("drop", (event) => {
 document.addEventListener("click", async (event) => {
   const el = event.target.closest("[data-b]");
   if (!el || !el.closest("#bankimport")) return;
+  if (el.dataset.b === "close") {
+    window.close();  // allowed: the app window opened with only this page in its history
+    setTimeout(() => toast({ ok: true, title: "Import Banks Data", message: "Close this window with its own \u2715 (the browser kept it open)." }), 300);
+    return;
+  }
+  if (el.dataset.b === "again") { BANK.again = true; drawBankImport(); return; }
   if (el.dataset.b === "restore") {
     const db = el.dataset.db;
     confirmDialog(`Restore ${db}?`, `${db} is dropped again and the backup taken before this import is put back.`, `Restore ${db}`, async () => {

@@ -1120,3 +1120,12 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .bank-bar { display: block; flex: 1 1 auto; width: 100%; min-width: 120px; }
 .bank-restore { gap: var(--s2); margin-bottom: var(--s3); flex-wrap: wrap; }
 .bank-log pre { height: min(46vh, 460px); }
+
+/* the tray's mini window (#bankmini): only this page, no top bar; varsha keeps it on top */
+.mini-window .topbar-band, .mini-window .page-head { display: none; }
+.mini-window .main { padding: var(--s3); }
+.mini-window .bank-drop { min-height: calc(100vh - 130px); padding: var(--s4); }
+.mini-window .bank-drop-inner b { font-size: 18px; }
+.mini-window .bank-log pre { height: calc(100vh - 250px); min-height: 150px; }
+.bank-mini-head { align-items: center; gap: var(--s2); margin-bottom: var(--s1); }
+.bank-again { margin-top: var(--s3); }
