@@ -25,6 +25,15 @@ class ExtraDbServer:
 # None by default: MySQL 5.6 now uses 3306 itself. Add e.g. another local MySQL here.
 DEFAULT_EXTRA_SERVERS: tuple[ExtraDbServer, ...] = ()
 
+# What the panel's Quit button does: ask every time, stop the services, or leave them running.
+QUIT_ACTIONS = ("ask", "stop", "leave")
+# Tray balloons, per kind (settings.json "tray_notifications": {"mail": false, ...}).
+NOTIFY_KINDS = {
+    "failures": "Something failed (a service, a backup, a task)",
+    "php_errors": "New PHP errors",
+    "mail": "New mail in Mailpit",
+}
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -41,6 +50,9 @@ class Settings:
     # Where database backups go (one subfolder per server). Empty: <root>/data/backups.
     # The one setting that may be absolute, e.g. "D:\\Varsha-Backups", so backups survive a reinstall.
     backup_dir: str = ""
+    open_panel_on_start: bool = True  # a normal start opens the panel in the browser (--startup never does)
+    quit_action: str = "ask"  # one of QUIT_ACTIONS
+    notify: tuple[str, ...] = tuple(NOTIFY_KINDS)  # the kinds of tray balloons that are shown
     # Not in settings.json (yet): tuning knobs, overridden by tests.
     stable_after: float = 60.0  # a service running this long gets its crash counter reset
     restart_delay: float = 1.0
@@ -110,6 +122,19 @@ def load_settings(path: Path) -> Settings:
         settings = replace(settings, backup_dir=value)
     if "phpmyadmin_extra_servers" in raw:
         settings = replace(settings, phpmyadmin_extra_servers=_extra_servers(raw["phpmyadmin_extra_servers"]))
+    if "open_panel_on_start" in raw:
+        if not isinstance(raw["open_panel_on_start"], bool):
+            raise ConfigError('settings.json: "open_panel_on_start" must be true or false')
+        settings = replace(settings, open_panel_on_start=raw["open_panel_on_start"])
+    if "quit_action" in raw:
+        if raw["quit_action"] not in QUIT_ACTIONS:
+            raise ConfigError(f'settings.json: "quit_action" must be one of {", ".join(QUIT_ACTIONS)}')
+        settings = replace(settings, quit_action=raw["quit_action"])
+    if "tray_notifications" in raw:
+        value = raw["tray_notifications"]
+        if not isinstance(value, dict) or not all(isinstance(v, bool) for v in value.values()):
+            raise ConfigError('settings.json: "tray_notifications" must be like {"mail": false}')
+        settings = replace(settings, notify=tuple(k for k in NOTIFY_KINDS if value.get(k, True)))
     return settings
 
 

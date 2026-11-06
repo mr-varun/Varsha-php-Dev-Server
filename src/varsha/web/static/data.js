@@ -28,7 +28,7 @@ async function renderData() {
 }
 
 async function loadDataList() {
-  try { DATA.list = await api.get("/api/data"); } catch (err) { toast({ ok: false, title: "Data", message: err.message }); }
+  try { DATA.list = await api.get("/api/data"); } catch (err) { toast({ ok: false, title: "Data Browser", message: err.message }); }
   renderDataFiles();
 }
 

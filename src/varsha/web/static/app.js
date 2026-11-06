@@ -8,10 +8,10 @@ const VIEWS = {
   stack: { title: "Stack", eyebrow: "home" },
   sites: { title: "Sites", eyebrow: "www \u2192 *.test" },
   databases: { title: "Databases", eyebrow: "mysql \u00b7 mariadb \u00b7 remote" },
-  data: { title: "Data", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
+  data: { title: "Data Browser", eyebrow: "sqlite \u00b7 access \u00b7 csv files" },
   rescue: { title: "MDB Rescue", eyebrow: "recover a damaged access database" },
   mysqlrescue: { title: "MySQL Rescue", eyebrow: "recover a damaged mysql / mariadb data folder" },
-  settings: { title: "Settings", eyebrow: "startup · services · control panel" },
+  settings: { title: "Settings", eyebrow: "startup · services · php · backups · tray" },
   mail: { title: "Mail", eyebrow: "mailpit \u00b7 every email php sends" },
   errors: { title: "PHP errors", eyebrow: "live from php-*.log \u00b7 every site" },
   tasks: { title: "Tasks", eyebrow: "cron \u00b7 scheduled commands" },
@@ -1788,10 +1788,13 @@ function quitDialog() {
     <div class="dialog-actions"><button class="btn" value="cancel">Cancel</button>
       <button class="btn" value="leave">Quit, leave running</button>
       <button class="btn btn-coral" value="stop">Stop all &amp; quit</button></div>`,
-  async (_data, choice) => {
-    await api.post("/api/quit", { stop_services: choice === "stop" });
-    document.body.innerHTML = `<main class="main"><div class="empty"><h3>varsha is shutting down</h3><p>You can close this tab. Start varsha again to reopen the panel.</p></div></main>`;
-  });
+  async (_data, choice) => quitNow(choice === "stop"));
+}
+
+async function quitNow(stopServices) {
+  await api.post("/api/quit", { stop_services: stopServices });
+  document.body.innerHTML = `<main class="main"><div class="empty"><h3>varsha is shutting down</h3><p>${stopServices
+    ? "Stopping the services first. " : "The services keep running. "}You can close this tab. Start varsha again to reopen the panel.</p></div></main>`;
 }
 
 // ---------------------------------------------------------------- events
@@ -1880,7 +1883,11 @@ document.addEventListener("click", async (event) => {
     case "php-default": await act(`/api/php/${encodeURIComponent(id)}/default`); return;
     case "php-config": phpDialog(id); return;
     case "ini-add": $("#ini-rows").insertAdjacentHTML("beforeend", iniRow("", "", $("#ini-rows").children.length)); return;
-    case "quit": quitDialog(); return;
+    case "quit": {  // Settings: ask, or stop / leave without asking
+      const action = (S && S.quit_action) || "ask";
+      if (action === "ask") quitDialog(); else quitNow(action === "stop");
+      return;
+    }
     case "git-refresh": GIT.sites = {}; fillSiteGit(); loadSiteGit(true); return;
     case "doc-run": runDoctor(); return;
     case "doc-fix": doctorAction("/api/doctor/fix", { fix: ref }); return;

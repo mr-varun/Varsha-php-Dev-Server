@@ -45,6 +45,10 @@ class Client:
         assert status == 303
         self.cookie = headers["Set-Cookie"].split(";")[0]
 
+    def get(self, path: str) -> tuple[int, Any]:
+        status, _, raw = self.request("GET", path)
+        return status, json.loads(raw or b"{}")
+
     def post(self, path: str, body: Any = None) -> tuple[int, Any]:
         status, _, raw = self.request("POST", path, body or {}, {"X-Varsha": "1", "Content-Type": "application/json"})
         return status, json.loads(raw or b"{}")
@@ -160,3 +164,30 @@ def test_a_refused_post_never_corrupts_the_next_request(panel) -> None:  # type:
             data += chunk
     assert b"403" in data.split(b"\r\n", 1)[0] and b"login has expired" in data
     assert b"501" not in data and b"Unsupported method" not in data
+
+
+def test_settings_batch_two_apply_at_once(panel, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import json
+    app, client = panel
+    client.login()
+    status, data = client.get("/api/settings")
+    assert status == 200 and data["quit_action"] == "ask" and data["open_panel_on_start"] is True
+    assert client.post("/api/settings/general", {"quit_action": "leave"})[0] == 200
+    assert client.get("/api/state")[1]["quit_action"] == "leave"  # the Quit button follows it at once
+    assert client.post("/api/settings/general", {"quit_action": "boom"})[0] == 400
+    assert client.post("/api/settings/general", {"open_panel_on_start": False})[0] == 200
+    assert client.post("/api/settings/notify", {"kinds": ["failures"]})[0] == 200
+    assert app.settings.notify == ("failures",)
+    folder = tmp_path / "my-backups"
+    assert client.post("/api/settings/backup-dir", {"folder": str(folder)})[0] == 200
+    assert app.databases.backup_root == folder and folder.is_dir()  # manager.settings changed too
+    saved = json.loads(app.paths.settings_file.read_text(encoding="utf-8"))
+    assert saved["quit_action"] == "leave" and saved["open_panel_on_start"] is False
+    assert saved["tray_notifications"] == {"failures": True, "php_errors": False, "mail": False}
+    assert saved["backup_dir"] == str(folder)
+    assert client.post("/api/settings/timezone", {"timezone": "not a zone!"})[0] == 400
+    assert client.post("/api/settings/timezone", {"timezone": "Asia/Kolkata"})[0] == 200
+    assert app.engine.settings.php_timezone == "Asia/Kolkata"  # the next php.ini uses it
+    assert app.settings.panel_port == Settings().panel_port  # never touched by these saves
+    status, body = client.post("/api/settings/notify-test", {})
+    assert status in (400, 500) or "tray" in str(body)  # no tray in tests

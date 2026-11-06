@@ -526,6 +526,16 @@ class PanelHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.OK, {"message": app.set_autostart(body.get("services"))})
         elif path == "/api/settings/panel-port":
             self._json(HTTPStatus.OK, app.set_panel_port(body.get("port")))
+        elif path == "/api/settings/general":
+            self._json(HTTPStatus.OK, {"message": app.set_general(body)})
+        elif path == "/api/settings/timezone":
+            self._json(HTTPStatus.OK, {"message": app.set_timezone(body.get("timezone"))})
+        elif path == "/api/settings/backup-dir":
+            self._json(HTTPStatus.OK, {"message": app.set_backup_dir(body.get("folder"))})
+        elif path == "/api/settings/notify":
+            self._json(HTTPStatus.OK, {"message": app.set_notify(body.get("kinds"))})
+        elif path == "/api/settings/notify-test":
+            self._json(HTTPStatus.OK, {"message": app.notify_test()})
         elif path == "/api/settings/restart":
             self._json(HTTPStatus.OK, {"message": "Restarting: this page reconnects on the new address"})
             threading.Thread(target=app.restart, daemon=True).start()

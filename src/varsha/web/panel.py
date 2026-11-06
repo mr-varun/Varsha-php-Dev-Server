@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ from varsha.services.manager import ServiceManager
 from varsha.services.models import ServiceState
 from varsha.services.remote import RemoteDbStore, test_connection, validate
 from varsha.services.resolve import expand
-from varsha.settings import Settings
+from varsha.settings import NOTIFY_KINDS, QUIT_ACTIONS, Settings
 from varsha.sites import hosts
 from varsha.sites.git import SiteGit
 from varsha.sites.manager import SiteManager
@@ -319,7 +319,7 @@ class PanelApp:
     def rescue_to_data(self, job: str, key: str) -> dict[str, Any]:
         """Open a rescue result (recovered .sqlite, rebuilt or repaired .mdb) on the Data page."""
         if key not in ("recovered_sqlite", "rebuilt_mdb", "repaired_mdb"):
-            raise ValueError("That result can't be opened on the Data page")
+            raise ValueError("That result can't be opened in the Data Browser")
         return self.data.register(str(self.rescue.output_path(job, key)))
 
     def rescue_import(self, job: str, service_id: str, database: str, kind: str = "rescue", key: str = "sql_dump") -> str:
@@ -351,6 +351,7 @@ class PanelApp:
             "version": __version__,
             "root": str(self.paths.root),
             "tld": self.settings.tld,
+            "quit_action": self.settings.quit_action,
             "services": services,
             "sites": [self._site_json(info) for info in self.sites.site_infos()],
             "site_error": self.sites.last_error,
@@ -588,6 +589,7 @@ class PanelApp:
 
     running_port: int = 0      # set by the GUI once the panel is listening
     restart_hook: Any = None   # set by the GUI: restart varsha (services keep running)
+    notify_hook: Any = None    # set by the GUI: (title, message, error) -> a tray balloon
 
     def _saved_panel_port(self) -> int:
         try:
@@ -597,8 +599,78 @@ class PanelApp:
             return self.settings.panel_port
 
     def settings_data(self) -> dict[str, Any]:
-        return app_settings.settings_snapshot(self.paths, self._saved_panel_port(), self.running_port or self.settings.panel_port,
-                                              self.manager, started_with=self.settings.panel_port)
+        snapshot = app_settings.settings_snapshot(self.paths, self._saved_panel_port(), self.running_port or self.settings.panel_port,
+                                                  self.manager, started_with=self.settings.panel_port)
+        s = self.settings
+        try:
+            overridden = sorted(folder for folder, o in self.engine.php_config.load().items()
+                                if any(k.lower() == "date.timezone" for k in o.ini))
+        except Exception:  # noqa: BLE001 - a broken php.json must not break the Settings page
+            overridden = []
+        default_php = self.engine.default_php()
+        return {**snapshot,
+                "open_panel_on_start": s.open_panel_on_start, "quit_action": s.quit_action,
+                "php_timezone": s.php_timezone, "timezone_overridden": overridden,
+                "timezones": app_settings.php_timezones(default_php.php_exe if default_php else None),
+                "backup_dir": s.backup_dir, "backup_path": str(self.databases.backup_root),
+                "notify": list(s.notify), "notify_kinds": [{"id": k, "label": v} for k, v in NOTIFY_KINDS.items()]}
+
+    def _apply_settings(self, file_changes: dict[str, Any], **fields: Any) -> None:
+        """Write settings.json and use the new values at once (panel, manager and config engine
+        share the settings; panel_port is not changed here: it stays the one this session started on)."""
+        update_settings_file(self.paths.settings_file, **file_changes)
+        for holder in (self, self.manager, self.engine):
+            holder.settings = replace(holder.settings, **fields)
+
+    def set_general(self, body: dict[str, Any]) -> str:
+        fields: dict[str, Any] = {}
+        if "open_panel_on_start" in body:
+            if not isinstance(body["open_panel_on_start"], bool):
+                raise ValueError("open_panel_on_start must be true or false")
+            fields["open_panel_on_start"] = body["open_panel_on_start"]
+        if "quit_action" in body:
+            if body["quit_action"] not in QUIT_ACTIONS:
+                raise ValueError(f"quit_action must be one of {', '.join(QUIT_ACTIONS)}")
+            fields["quit_action"] = body["quit_action"]
+        if not fields:
+            raise ValueError("Nothing to change")
+        self._apply_settings(dict(fields), **fields)
+        if "quit_action" in fields:
+            return {"ask": "Quit asks every time", "stop": "Quit stops all services, without asking",
+                    "leave": "Quit leaves the services running, without asking"}[fields["quit_action"]]
+        return ("The control panel opens in the browser when varsha starts" if fields["open_panel_on_start"]
+                else "varsha starts quietly in the tray (click the tray icon for the panel)")
+
+    def set_timezone(self, value: Any) -> str:
+        default_php = self.engine.default_php()
+        tz = app_settings.check_timezone(value, app_settings.php_timezones(default_php.php_exe if default_php else None))
+        if tz == self.settings.php_timezone:
+            return f"PHP already uses {tz}"
+        self._apply_settings({"php_timezone": tz}, php_timezone=tz)
+        apache = next((s for s in self.manager.statuses() if s.type == "apache"), None)
+        if apache is not None and apache.state.value == "running":
+            self.run_task("Apply the PHP timezone", self.manager.reload, apache.id,
+                          success=lambda _r: f"PHP now uses {tz} (Apache reloaded)")
+            return f"PHP timezone set to {tz}; Apache reloads to apply it"
+        return f"PHP timezone set to {tz}; it applies when Apache starts"
+
+    def set_backup_dir(self, value: Any) -> str:
+        text, path = app_settings.check_backup_dir(value, self.paths.root)
+        self._apply_settings({"backup_dir": text}, backup_dir=text)
+        return f"New backups go to {path} (earlier backups stay where they are)"
+
+    def set_notify(self, kinds: Any) -> str:
+        if not isinstance(kinds, list) or not all(k in NOTIFY_KINDS for k in kinds):
+            raise ValueError(f"notifications must be a list of: {', '.join(NOTIFY_KINDS)}")
+        chosen = tuple(k for k in NOTIFY_KINDS if k in kinds)
+        self._apply_settings({"tray_notifications": {k: k in chosen for k in NOTIFY_KINDS}}, notify=chosen)
+        return "Tray notifications: " + (", ".join(NOTIFY_KINDS[k].split(" (")[0].lower() for k in chosen) if chosen else "none")
+
+    def notify_test(self) -> str:
+        if self.notify_hook is None:
+            raise ServiceError("The tray isn't available here")
+        self.notify_hook("varsha", "This is how varsha's tray notifications look.", False)
+        return "A test notification was sent to the tray"
 
     def set_startup(self, enabled: bool) -> str:
         return app_settings.StartupEntry().set(enabled)

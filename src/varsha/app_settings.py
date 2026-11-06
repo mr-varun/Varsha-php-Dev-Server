@@ -1,4 +1,5 @@
-"""The Settings page: start with Windows, auto-start services, the control panel's port.
+"""The Settings page: start with Windows, auto-start services, the control panel's port, opening
+the panel on start, what Quit does, the PHP timezone, the backup folder and tray notifications.
 
 Start with Windows uses the current user's Run key (HKCU\\...\\CurrentVersion\\Run), so no admin
 rights are needed and nothing is installed. The deployed Varsha.exe and a source checkout get their
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import sys
 from pathlib import Path
@@ -137,6 +139,74 @@ def check_panel_port(port: Any, current: int, service_ports: set[int]) -> int:
         except OSError:
             raise ValueError(f"Port {port} is in use by another program") from None
     return port
+
+
+# ---------------------------------------------------------------------- PHP timezone
+
+TIMEZONE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z0-9_+-]+){0,2}")
+_zones_cache: dict[str, list[str]] = {}
+
+
+def php_timezones(php_exe: Path | None) -> list[str]:
+    """The timezone names PHP itself knows (timezone_identifiers_list), cached per php.exe."""
+    if php_exe is None:
+        return []
+    key = str(php_exe).lower()
+    if key not in _zones_cache:
+        from varsha.services import process as proc_utils
+        try:
+            result = proc_utils.run_quiet([str(php_exe), "-n", "-r", 'echo implode("\\n", timezone_identifiers_list());'],
+                                          timeout=30)
+            zones = [z.strip() for z in result.stdout.splitlines() if TIMEZONE_RE.fullmatch(z.strip())]
+        except OSError:
+            zones = []
+        if not zones:
+            return []  # not cached: try again next time
+        _zones_cache[key] = zones
+    return _zones_cache[key]
+
+
+def check_timezone(value: Any, known: list[str]) -> str:
+    tz = str(value or "").strip()
+    if not TIMEZONE_RE.fullmatch(tz):
+        raise ValueError("Type a timezone like Asia/Kolkata or UTC")
+    if known:
+        match = next((z for z in known if z.lower() == tz.lower()), None)
+        if match is None:
+            raise ValueError(f"PHP doesn't know the timezone {tz!r} (e.g. Asia/Kolkata, Europe/London, UTC)")
+        tz = match
+    return tz
+
+
+# ---------------------------------------------------------------------- backup folder
+
+def check_backup_dir(value: Any, root: Path) -> tuple[str, Path]:
+    """The text to store ("" = the default data\\backups) and the folder it means. The folder is
+    created if needed and must be writable; it may not be inside www\\ (sites would serve it)."""
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return "", root / "data" / "backups"
+    path = Path(text)
+    if ".." in path.parts:
+        raise ValueError('The backup folder must not contain ".."')
+    if not path.is_absolute():
+        if path.drive or text.startswith(("\\", "/")):
+            raise ValueError("Give a full path such as D:\\Varsha-Backups, or a folder inside varsha such as data\\backups")
+        path = root / path
+    if path.parent == path:
+        raise ValueError("Choose a folder, not a whole drive")
+    resolved = path.resolve()
+    www = (root / "www").resolve()
+    if resolved == www or www in resolved.parents:
+        raise ValueError("Backups can't go inside www\\: Apache would serve them to anyone who asks")
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+        probe = resolved / f".varsha-write-test-{os.getpid()}"
+        probe.write_bytes(b"ok")
+        probe.unlink()
+    except OSError as exc:
+        raise ValueError(f"varsha can't write to {resolved}: {exc.strerror or exc}") from None
+    return text, resolved
 
 
 def settings_snapshot(paths: AppPaths, panel_port: int, running_port: int, manager: Any,

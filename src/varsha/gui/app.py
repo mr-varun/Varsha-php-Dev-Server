@@ -239,9 +239,12 @@ def main(argv: list[str] | None = None) -> int:
         while not panel.events.closed:
             for seq, kind, data in panel.events.wait(last, timeout=30):
                 last = seq
+                wanted = panel.settings.notify  # the Settings page can change it at any time
                 if kind == "toast" and isinstance(data, dict) and not data.get("ok"):
+                    if "failures" not in wanted:
+                        continue
                     main_thread.notify.emit(str(data.get("title", "varsha")), str(data.get("message", "")), True)
-                elif kind == "php_error" and isinstance(data, dict) and data.get("new"):
+                elif kind == "php_error" and isinstance(data, dict) and data.get("new") and "php_errors" in wanted:
                     new = data["new"]
                     first = new[0]
                     where = first["site"] or (first["file_name"] or "PHP")
@@ -252,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
                     else:
                         main_thread.notify.emit(f"{len(new)} new PHP errors",
                                                 f"Latest in {where}: {first['message'][:120]}", True)
-                elif kind == "mail" and isinstance(data, dict) and data.get("new"):
+                elif kind == "mail" and isinstance(data, dict) and data.get("new") and "mail" in wanted:
                     new = data["new"]
                     sender = new[0]["from"]["name"] or new[0]["from"]["address"]
                     if len(new) == 1:
@@ -261,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
                         main_thread.notify.emit(f"{len(new)} new emails", f"Latest from {sender}. Open the Mail page to read them.", False)
 
     main_thread.notify.connect(tray.notify)
+    panel.notify_hook = main_thread.notify.emit
     threading.Thread(target=on_event_toast, name="tray-toasts", daemon=True).start()
 
     quitting = {"done": False}
@@ -297,7 +301,7 @@ def main(argv: list[str] | None = None) -> int:
     panel.php_errors.start()
     sites.start_watching()
     panel.run_task("Autostart", manager.start_autostart)
-    if not args.no_browser:
+    if not args.no_browser and settings.open_panel_on_start:
         webbrowser.open(server.login_url)
 
     try:
