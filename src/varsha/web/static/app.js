@@ -21,6 +21,23 @@ const VIEWS = {
   system: { title: "System", eyebrow: "php \u00b7 https \u00b7 dns \u00b7 folders" },
   doctor: { title: "Doctor", eyebrow: "check everything \u00b7 one click" },
 };
+// Line icons (24x24, stroke = currentColor), drawn for varsha. icon(name) gives the <svg>.
+const ICONS = {
+  "unlock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>',
+  "folder": '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  "code": '<path d="M8 7l-5 5 5 5"/><path d="M16 7l5 5-5 5"/><path d="M14 4l-4 16"/>',
+  "terminal": '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><path d="M12 15h5"/>',
+  "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/>',
+  "wifi": '<path d="M2 9a15 15 0 0 1 20 0"/><path d="M5.5 12.5a10 10 0 0 1 13 0"/><path d="M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="0.8"/>',
+  "wifi-off": '<path d="M2 9a15 15 0 0 1 20 0"/><path d="M5.5 12.5a10 10 0 0 1 13 0"/><path d="M9 16a5 5 0 0 1 6 0"/><path d="M3 3l18 18"/>',
+  "trash": '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+  "play": '<path class="ico-fill" d="M7 4l13 8-13 8z"/>',
+  "restart": '<path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/>',
+  "stop": '<rect class="ico-fill" x="6" y="6" width="12" height="12" rx="1.5"/>',
+  "power": '<path d="M12 3v9"/><path d="M6.5 6.5a8 8 0 1 0 11 0"/>',
+};
+const icon = (name, label = "") => `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>${label ? `<span class="ico-name">${esc(label)}</span>` : ""}`;
+
 const SHORTCUTS = ["stack", "sites", "databases", "mail", "errors", "tasks", "share", "logs", "system", "doctor"];  // keys 1-9, 0
 const BUSY = new Set(["starting", "stopping"]);
 const OFF = new Set(["missing", "disabled"]);
@@ -389,15 +406,15 @@ function viewSites() {
         <div class="ticket-git" data-git="${esc(site.domain)}">${gitLine(GIT.sites[site.domain])}</div>
         <div class="ticket-actions">
           <a class="btn btn-sm btn-blue" href="${esc(site.url)}" target="_blank" rel="noopener">Open \u2197</a>
-          ${site.https ? `<a class="btn btn-sm" href="${esc(site.url.replace("https://", "http://"))}" target="_blank" rel="noopener">http</a>` : ""}
-          <button class="btn btn-sm" data-act="open" data-what="site" data-ref="${esc(site.domain)}">Folder</button>
-          <button class="btn btn-sm" data-act="vscode" data-ref="${esc(site.domain)}" title="Open ${esc(site.link || site.folder)} in VS Code">VS Code</button>
-          <button class="btn btn-sm" data-act="terminal" data-ref="${esc(site.domain)}">Terminal</button>
-          <button class="btn btn-sm" data-act="share-site" data-ref="${esc(site.domain)}" title="A public link through Cloudflare">Share</button>
+          ${site.https ? `<a class="btn btn-sm icon-btn" href="${esc(site.url.replace("https://", "http://"))}" target="_blank" rel="noopener" aria-label="Open over http">${icon("unlock", "Open over http")}</a>` : ""}
+          <button class="btn btn-sm icon-btn" data-act="open" data-what="site" data-ref="${esc(site.domain)}" aria-label="Folder">${icon("folder", "Folder")}</button>
+          <button class="btn btn-sm icon-btn" data-act="vscode" data-ref="${esc(site.domain)}" aria-label="Open ${esc(site.link || site.folder)} in VS Code">${icon("code", "VS Code")}</button>
+          <button class="btn btn-sm icon-btn" data-act="terminal" data-ref="${esc(site.domain)}" aria-label="Terminal">${icon("terminal", "Terminal")}</button>
+          <button class="btn btn-sm icon-btn" data-act="share-site" data-ref="${esc(site.domain)}" aria-label="Share: a public link through Cloudflare">${icon("globe", "Share (public link)")}</button>
           ${lanShare(site.domain)
-            ? `<button class="btn btn-sm btn-ink" data-act="lan-stop" data-ref="${esc(site.domain)}" title="Stop sharing on the LAN">Stop LAN</button>`
-            : `<button class="btn btn-sm" data-act="lan-share" data-ref="${esc(site.domain)}" title="Let colleagues on the same Wi-Fi open it">LAN</button>`}
-          <button class="btn btn-sm btn-coral" data-act="site-delete" data-ref="${esc(site.domain)}" title="Move to the Recycle Bin">Delete</button>
+            ? `<button class="btn btn-sm btn-ink icon-btn" data-act="lan-stop" data-ref="${esc(site.domain)}" aria-label="Stop sharing on the LAN">${icon("wifi-off", "Stop LAN share")}</button>`
+            : `<button class="btn btn-sm icon-btn" data-act="lan-share" data-ref="${esc(site.domain)}" aria-label="Let colleagues on the same Wi-Fi open it">${icon("wifi", "Share on the LAN")}</button>`}
+          <button class="btn btn-sm btn-coral icon-btn" data-act="site-delete" data-ref="${esc(site.domain)}" aria-label="Delete: move to the Recycle Bin">${icon("trash", "Delete")}</button>
         </div></article>`).join("")}</div>`);
   }
   return parts.join("");

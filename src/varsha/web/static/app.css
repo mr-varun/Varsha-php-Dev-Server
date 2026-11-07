@@ -799,7 +799,7 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .tickets-3 .ticket-meta { margin: 0; line-height: 1.45; }
 .tickets-3 .php-pick { margin: 0; }
 .tickets-3 .php-pick .select { min-width: 0; width: 100%; }
-.tickets-3 .ticket-actions { flex-wrap: nowrap; gap: 6px; }
+.tickets-3 .ticket-actions { flex-wrap: wrap; gap: 6px; }  /* icons fit one row; wraps only on narrow cards */
 .tickets-3 .ticket-actions .btn { min-height: 30px; padding: 3px 9px; font-size: 12.5px; }
 .tickets-3 .ticket-actions .btn-coral { margin-left: auto; }
 @media (max-width: 1100px) { .tickets.tickets-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -1129,3 +1129,15 @@ h1 { margin: 0; font: var(--title-weight) 38px/1 var(--font-title); letter-spaci
 .mini-window .bank-log pre { height: calc(100vh - 250px); min-height: 150px; }
 .bank-mini-head { align-items: center; gap: var(--s2); margin-bottom: var(--s1); }
 .bank-again { margin-top: var(--s3); }
+
+/* Icon buttons (line icons from app.js ICONS / index.html): on hover (or keyboard focus) the
+   button shows its name in place of the icon - the user's choice, no floating label */
+.ico { width: 18px; height: 18px; display: block; flex: none; }
+.ico .ico-fill { fill: currentColor; }
+.icon-btn { justify-content: center; white-space: nowrap; }
+.icon-btn .ico-name { display: none; }
+.icon-btn:hover .ico, .icon-btn:focus-visible .ico { display: none; }
+.icon-btn:hover .ico-name, .icon-btn:focus-visible .ico-name { display: inline; }
+.ticket-actions .icon-btn { min-width: 36px; padding: 3px 8px; }
+.topbar-actions .icon-btn { min-width: 46px; padding: 6px 10px; }
+.topbar-actions .icon-btn .ico { width: 20px; height: 20px; }
