@@ -335,7 +335,8 @@ class ServiceManager:
             if rt is None and module_targets:
                 cmdline = proc.info.get("cmdline") or []
                 for module, candidate in module_targets.items():
-                    if ("-m" in cmdline or "--run-module" in cmdline) and module in cmdline:
+                    if (("-m" in cmdline or "--run-module" in cmdline) and module in cmdline
+                            and self._started_here(proc)):
                         rt = candidate
                         break
             if rt is not None:
@@ -354,6 +355,15 @@ class ServiceManager:
                 rt.started_at = time.monotonic()
                 self._set(rt, ServiceState.RUNNING, f"adopted from an earlier session (PID {root.pid})")
             logger.info("Adopted running %s (PID %s)", sid, root.pid)
+
+    def _started_here(self, proc: psutil.Process) -> bool:
+        """Built-in services start with this varsha's folder as their working folder, so another
+        copy's (C:\\Varsha's DNS seen from the checkout, or the other way round) is never adopted."""
+        try:
+            cwd = Path(proc.cwd())
+        except (psutil.Error, OSError):
+            return False
+        return os.path.normcase(os.path.abspath(cwd)) == os.path.normcase(os.path.abspath(self.paths.root))
 
     def _runs_our_config(self, defn: ServiceDef, cmdline: list[str]) -> bool:
         """Does this command line belong to the service as varsha starts it (its config file, else

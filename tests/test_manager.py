@@ -215,3 +215,24 @@ def test_only_processes_with_our_config_are_adopted(make_manager, app_paths) -> 
     mail = dataclasses.replace(fake_def("mail", 2), data_dir="data/mailpit")
     assert manager._runs_our_config(mail, ["mailpit.exe", "--database", f"{root}/data/mailpit/mailpit.db"])  # noqa: SLF001
     assert manager._runs_our_config(fake_def("plain", 3), ["anything"])  # neither: the exe alone decides  # noqa: SLF001
+
+
+def test_built_in_services_of_another_varsha_are_not_adopted(make_manager, app_paths, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    import subprocess
+    import sys
+    import time
+    from conftest import free_port
+    manager = make_manager([fake_def("svc", free_port())])
+    other = tmp_path / "other-varsha"
+    other.mkdir()
+    procs = [subprocess.Popen([sys._base_executable, "-c", "import time; time.sleep(30)"], cwd=str(cwd))  # type: ignore[attr-defined]
+             for cwd in (app_paths.root, other)]
+    try:
+        time.sleep(0.5)
+        ours, theirs = (psutil.Process(p.pid) for p in procs)
+        assert manager._started_here(ours) is True  # noqa: SLF001
+        assert manager._started_here(theirs) is False  # e.g. C:\Varsha's DNS seen from the checkout  # noqa: SLF001
+    finally:
+        for p in procs:
+            p.kill()
+            p.wait(10)
