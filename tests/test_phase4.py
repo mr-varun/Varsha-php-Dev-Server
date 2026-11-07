@@ -242,3 +242,27 @@ def test_link_refuses_varsha_itself_drives_and_files(root: Path, tools: DevTools
 def test_laravel_is_gone(tools: DevTools) -> None:
     with pytest.raises(ServiceError, match="Unknown site type"):
         tools.create("laravel", "shop")
+
+
+def test_vs_code_opens_the_real_project_folder(root: Path, tools: DevTools, tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    import _winapi
+    import subprocess as sp
+    project = tmp_path / "projects" / "admin"
+    (project / "public").mkdir(parents=True)
+    _winapi.CreateJunction(str(project), str(root / "www" / "admin"))  # a "Link a folder" site
+    (root / "www" / "shop").mkdir(parents=True)  # a normal one
+    assert tools.project_folder("admin.test") == project  # the junction's target, not www\admin
+    assert tools.project_folder("shop.test") == root / "www" / "shop"
+    launched: list[list[str]] = []
+    monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: launched.append(cmd))
+    code = tmp_path / "Code.exe"
+    code.write_bytes(b"")
+    monkeypatch.setattr(DevTools, "find_vscode", staticmethod(lambda: code))
+    assert str(project) in tools.open_vscode("admin.test")
+    assert launched == [[str(code), str(project)]]
+    monkeypatch.setattr(DevTools, "find_vscode", staticmethod(lambda: None))
+    with pytest.raises(ServiceError, match="VS Code isn't installed"):
+        tools.open_vscode("admin.test")
+    (root / "www" / "admin").rmdir()  # only the junction goes
+    assert project.is_dir()

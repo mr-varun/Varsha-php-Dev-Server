@@ -176,6 +176,41 @@ class DevTools:
             encoding="utf-8")
         return script
 
+    def project_folder(self, domain: str) -> Path:
+        """Where a site's files really are: for a linked site ("Link a folder") the folder the
+        junction points to, else its folder in www. Checked with is_junction() first, so the link
+        itself is never followed by accident elsewhere."""
+        site = self.site(domain)
+        entry = self.paths.www / site.folder.name
+        try:
+            if entry.is_junction() or entry.is_symlink():
+                target = Path(os.readlink(entry).removeprefix("\\\\?\\"))
+                if target.is_dir():
+                    return target
+        except OSError:
+            pass
+        return site.folder
+
+    @staticmethod
+    def find_vscode() -> Path | None:
+        candidates = [Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Microsoft VS Code" / "Code.exe",
+                      Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Microsoft VS Code" / "Code.exe",
+                      Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Microsoft VS Code" / "Code.exe"]
+        on_path = shutil.which("code")  # ...\Microsoft VS Code\bin\code(.cmd): Code.exe is one folder up
+        if on_path:
+            candidates.append(Path(on_path).resolve().parent.parent / "Code.exe")
+        return next((c for c in candidates if c.is_file()), None)
+
+    def open_vscode(self, domain: str) -> str:
+        """Open the site's real project folder in VS Code."""
+        code = self.find_vscode()
+        if code is None:
+            raise ServiceError("VS Code isn't installed (Code.exe wasn't found)")
+        folder = self.project_folder(domain)
+        subprocess.Popen([str(code), str(folder)], close_fds=True,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return f"Opening {folder} in VS Code"
+
     def open_terminal(self, domain: str | None = None) -> str:
         site = self.site(domain) if domain else None
         build = self.php_for(site)

@@ -536,6 +536,8 @@ class PanelHandler(BaseHTTPRequestHandler):
                 return message
 
             task(f"Delete {m.group(1)}", delete, success=lambda msg: msg)
+        elif m := re.fullmatch(r"/api/sites/([a-z0-9.-]+)/vscode", path):
+            self._json(HTTPStatus.OK, {"message": app.tools.open_vscode(m.group(1))})
         elif m := re.fullmatch(r"/api/sites/([a-z0-9.-]+)/terminal", path):
             self._json(HTTPStatus.OK, {"message": app.tools.open_terminal(m.group(1))})
         elif path == "/api/terminal":

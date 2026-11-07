@@ -391,6 +391,7 @@ function viewSites() {
           <a class="btn btn-sm btn-blue" href="${esc(site.url)}" target="_blank" rel="noopener">Open \u2197</a>
           ${site.https ? `<a class="btn btn-sm" href="${esc(site.url.replace("https://", "http://"))}" target="_blank" rel="noopener">http</a>` : ""}
           <button class="btn btn-sm" data-act="open" data-what="site" data-ref="${esc(site.domain)}">Folder</button>
+          <button class="btn btn-sm" data-act="vscode" data-ref="${esc(site.domain)}" title="Open ${esc(site.link || site.folder)} in VS Code">VS Code</button>
           <button class="btn btn-sm" data-act="terminal" data-ref="${esc(site.domain)}">Terminal</button>
           <button class="btn btn-sm" data-act="share-site" data-ref="${esc(site.domain)}" title="A public link through Cloudflare">Share</button>
           ${lanShare(site.domain)
@@ -1887,6 +1888,10 @@ document.addEventListener("click", async (event) => {
       return;
     case "create": createDialog(); return;
     case "site-delete": deleteSiteDialog(ref); return;
+    case "vscode":
+      try { toast({ ok: true, title: "VS Code", message: (await api.post(`/api/sites/${ref}/vscode`)).message }); }
+      catch (err) { toast({ ok: false, title: "VS Code", message: err.message }); }
+      return;
     case "terminal":
       try { toast({ ok: true, title: "Terminal", message: (await api.post(ref ? `/api/sites/${ref}/terminal` : "/api/terminal")).message }); }
       catch (err) { toast({ ok: false, title: "Terminal", message: err.message }); }
